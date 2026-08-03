@@ -2,7 +2,7 @@
   "name": "o3de-development-tools",
   "displayName": "O3DE Development Tools",
   "description": "Developer companion for Open 3D Engine (O3DE): guided workspace setup, one-click CMake build & run, and C++ IntelliSense — for VS Code on Windows.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "icon": "media/icon.png",
   "publisher": "GenomeStudiosInc",
   "license": "MIT",
