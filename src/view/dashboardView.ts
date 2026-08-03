@@ -21,6 +21,7 @@
 
 import * as vscode from "vscode";
 import { RunState } from "../build/runState";
+import { ActivitySnapshot, BuildState } from "../build/buildState";
 import { OnboardingStatus } from "./onboardingStatus";
 import { BuildOptions } from "../build/buildOptions";
 import { targetsLabel, coreCountLabel } from "../build/buildCommand";
@@ -37,6 +38,8 @@ const COMMANDS: Record<string, string> = {
   run: "o3de.run",
   runDebug: "o3de.runDebug",
   stop: "o3de.stopRun",
+  stopBuild: "o3de.stopBuild",
+  stopConfigure: "o3de.stopConfigure",
   terminal: "o3de.openDeveloperTerminal",
   log: "o3de.showLog",
   openSettings: "o3de.openSettings",
@@ -78,7 +81,12 @@ function statusPayload(deps: DependencyStatus): StatusPayload {
 // The two language sections mirror each other: "always-use" first, "sometimes-
 // use" next, and one-and-done setup lives in Onboarding (not here). C++ and Lua
 // each render into their own collapsible section.
-function configPayload(options: BuildOptions, onboarding: OnboardingStatus) {
+function configPayload(options: BuildOptions, onboarding: OnboardingStatus, activity: ActivitySnapshot) {
+  // Configure is a config ROW rather than a button, but it still TOGGLES: while a
+  // configure runs the row becomes its own Stop control (the progress itself is on
+  // the bar up top). Clicking it used to just report "already running", which gave
+  // the user no way to stop it from where they started it.
+  const configuring = activity.configure;
   return {
     // Both gate on "a project is present" — the real precondition (generator/
     // config/runTarget always have defaults, so there's no other unset state).
@@ -105,7 +113,13 @@ function configPayload(options: BuildOptions, onboarding: OnboardingStatus) {
       {
         title: "Configuration",
         rows: [
-          { label: "Configure Project", cmd: "configureProject" },
+          configuring
+            ? {
+                label: "Configure Project",
+                value: configuring.cancelling ? "Stopping…" : "■ Stop Configure",
+                cmd: "stopConfigure",
+              }
+            : { label: "Configure Project", cmd: "configureProject" },
           { label: "Generate C++ IntelliSense", cmd: "generateCppProperties" },
           { label: "Add Gems / Folders", cmd: "addGems" },
         ],
@@ -135,6 +149,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly runState: RunState,
+    private readonly buildState: BuildState,
     private readonly onboarding: OnboardingStatus,
     private readonly options: BuildOptions,
     private readonly deps: DependencyStatus,
@@ -203,13 +218,22 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const postStatus = (): void =>
       void webview.postMessage({ type: "status", ...statusPayload(this.deps) });
     const postConfig = (): void =>
-      void webview.postMessage({ type: "config", ...configPayload(this.options, this.onboarding) });
+      void webview.postMessage({
+        type: "config",
+        ...configPayload(this.options, this.onboarding, this.buildState.activity),
+      });
     const postDeps = (): void =>
       void webview.postMessage({ type: "deps", model: buildOnboardingModel(this.deps.resultMap, this.deps.view) });
 
     this.disposeSubs();
     this.subs.push(
       this.runState.onDidChange((running) => void webview.postMessage({ type: "runState", running })),
+      // Job activity drives the Build/Stop toggle + the Class Wizard button, and
+      // re-posts config so the Configure row shows its own running state.
+      this.buildState.onDidChange((activity) => {
+        void webview.postMessage({ type: "jobs", activity });
+        postConfig();
+      }),
       this.onboarding.onDidChange(() => postConfig()), // canBuild/canRun gate on project presence
       this.options.onDidChange(() => postConfig()),
       this.deps.onDidChange(() => {
@@ -243,8 +267,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       `script-src 'nonce-${nonce}'; img-src ${webview.cspSource};`;
     const initial = JSON.stringify({
       running: this.runState.isRunning,
+      activity: this.buildState.activity,
       status: statusPayload(this.deps),
-      config: configPayload(this.options, this.onboarding),
+      config: configPayload(this.options, this.onboarding, this.buildState.activity),
       deps: buildOnboardingModel(this.deps.resultMap, this.deps.view),
       collapse: this.getCollapse(),
     });
@@ -297,7 +322,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     .row { display: flex; gap: 6px; align-items: stretch; flex-wrap: wrap; }
     button {
       font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
-      height: 30px; border: none; border-radius: 4px; cursor: pointer;
+      height: 30px; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;
       display: flex; align-items: center; justify-content: center; gap: 6px;
       color: var(--vscode-button-foreground); background: var(--vscode-button-background);
       transition: background 80ms ease, filter 80ms ease;
@@ -326,6 +351,39 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     .stop { background: var(--vscode-statusBarItem-errorBackground, #b91c1c); color: #ffffff; }
     .stop:hover { background: var(--vscode-statusBarItem-errorBackground, #b91c1c); filter: brightness(1.12); }
     .stop:disabled { opacity: 0.4; }
+    /* The action's own glyph carries the Stop state, so drop the inline icon
+       (Build's wrench) while stopped and let it return with the Build label. */
+    .stop svg { display: none; }
+
+    /* Progress bar — an Output channel can't redraw a status line, so ninja's
+       [n/m] surfaces here: newest output line + percentage, then the track. */
+    .prog { display: none; flex-direction: column; gap: 3px; padding: 2px 1px 0; }
+    .prog.on { display: flex; }
+    .prog-top { display: flex; align-items: baseline; gap: 8px; font-size: 10px; }
+    /* Clips the END only, keeping the start of the line (the action/file it
+       reports). The full text is on the element's title. */
+    .prog-line {
+      flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-family: var(--vscode-editor-font-family, monospace);
+      color: var(--vscode-descriptionForeground);
+    }
+    .prog-pct {
+      flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums;
+      color: var(--vscode-foreground);
+    }
+    .prog-track {
+      height: 6px; border-radius: 3px; overflow: hidden;
+      background: var(--vscode-panel-border); opacity: 0.9;
+    }
+    .prog-fill {
+      height: 100%; width: 0%; border-radius: 3px;
+      background: var(--vscode-progressBar-background, #0e70c0);
+      transition: width 200ms linear;
+    }
+    /* No [n/m] to read (e.g. the Visual Studio generator): sweep, don't fake a %. */
+    .prog-track.indeterminate .prog-fill { width: 30%; animation: slide 1.3s ease-in-out infinite; }
+    @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+    .prog.cancelling .prog-fill { background: var(--vscode-statusBarItem-errorBackground, #b91c1c); }
 
     .divider { height: 1px; background: var(--vscode-panel-border); margin: 2px 0; opacity: 0.7; }
     .divider.wide { margin: 14px 0 8px; }
@@ -430,6 +488,15 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         <button id="build" class="primary" title="Build the selected target(s) with the current config">${icon("tools")}<span>Build</span></button>
         <button id="run" class="primary" title="Launch the selected run target"><span>▶ Run</span></button>
       </div>
+      <!-- Live progress for the running build/configure: newest output line +
+           percentage above the bar. Hidden entirely when nothing is running. -->
+      <div class="prog" id="prog">
+        <div class="prog-top">
+          <span class="prog-line" id="prog-line"></span>
+          <span class="prog-pct" id="prog-pct"></span>
+        </div>
+        <div class="prog-track" id="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+      </div>
     </div>
 
     <div class="group">
@@ -475,7 +542,15 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const luaEl = document.getElementById('lua');
     const depsEl = document.getElementById('deps');
     const setupStatus = document.getElementById('setup-status');
+    const wizardBtn = document.getElementById('classWizard');
+    const debugBtn = document.getElementById('runDebug');
+    const progEl = document.getElementById('prog');
+    const progLine = document.getElementById('prog-line');
+    const progPct = document.getElementById('prog-pct');
+    const progTrack = document.getElementById('prog-track');
+    const progFill = document.getElementById('prog-fill');
     let running = false, canBuild = false, canRun = false;
+    let activity = {};
 
     function send(command) { vscode.postMessage({ command }); }
     function sendView(view) { vscode.postMessage({ view }); }
@@ -512,15 +587,84 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     }
 
     // ---- Build & Run enablement ----
+    // While a build runs the Build slot stays enabled — it's the Stop control now,
+    // the same way the Run slot stays enabled to become Stop.
+    //
+    // The cross-guards: don't build while a configure is rewriting the CMake cache,
+    // and don't LAUNCH while a build is still writing the binaries. Stop is never
+    // blocked — force-quitting the Editor mid-build is exactly what unblocks a link.
     function applyEnable() {
-      buildBtn.disabled = !canBuild;
-      buildBtn.title = canBuild
-        ? 'Build the selected target(s) with the current config'
-        : 'No O3DE project in the workspace — complete Onboarding first';
-      runBtn.disabled = !running && !canRun;
-      if (!running) {
-        runBtn.title = canRun ? 'Launch the selected run target' : 'No run target — set up a project first';
+      const building = !!activity.build;
+      const configuring = !!activity.configure;
+
+      buildBtn.disabled = !building && (!canBuild || configuring);
+      if (!building) {
+        buildBtn.title = configuring
+          ? 'A configure is running — wait for it to finish before building'
+          : canBuild
+            ? 'Build the selected target(s) with the current config'
+            : 'No O3DE project in the workspace — complete Onboarding first';
       }
+
+      runBtn.disabled = !running && (!canRun || building);
+      if (!running) {
+        runBtn.title = building
+          ? "A build is running — its binaries are being written. Stop the build (or wait) before launching."
+          : canRun ? 'Launch the selected run target' : 'No run target — set up a project first';
+      }
+
+      // Run in Debug launches the same binaries, so it's held back too.
+      debugBtn.disabled = building;
+      debugBtn.title = building
+        ? 'A build is running — wait for it to finish before debugging'
+        : 'Run the selected target under the C++ debugger';
+    }
+
+    // ---- Managed-job activity: Build <-> Stop Build, and the progress bar ----
+    // The output line is NOT trimmed here: CSS text-overflow already clips the
+    // END, and trimming the start as well compressed it from both sides
+    // ("…log log log…"), hiding what the line actually says. One mechanism only,
+    // and it keeps the beginning — the action or file the line is reporting.
+    function setJobs(next) {
+      activity = next || {};
+
+      // Build slot: purely the Stop control now — the bar below owns progress.
+      const b = activity.build;
+      buildBtn.classList.toggle('stop', !!b);
+      buildBtn.dataset.cmd = b ? 'stopBuild' : 'build';
+      const buildLabel = buildBtn.querySelector('span');
+      if (b) {
+        buildLabel.textContent = b.cancelling ? 'Stopping…' : '■ Stop Build';
+        buildBtn.title = b.cancelling
+          ? 'Stopping the build — killing its process tree…'
+          : 'Stop “' + b.label + '” (' + (b.progress || 'running') + ') and kill its process tree';
+      } else {
+        buildLabel.textContent = 'Build';
+      }
+
+      // Progress bar: follows whichever job claimed it (build, else configure).
+      const bar = activity.bar;
+      progEl.classList.toggle('on', !!bar);
+      progEl.classList.toggle('cancelling', !!bar && bar.cancelling);
+      if (bar) {
+        progLine.textContent = bar.cancelling
+          ? 'Stopping ' + bar.label + '…'
+          : (bar.lastLine || bar.label + '…');
+        progLine.title = bar.lastLine || bar.label;
+        progPct.textContent = bar.percent ? bar.percent + '%' : '';
+        progTrack.classList.toggle('indeterminate', !bar.percent);
+        progFill.style.width = bar.percent ? bar.percent + '%' : '';
+      }
+
+      // Class Wizard — a GUI that's open, not work with a percentage, so it just
+      // reflects "open" rather than feeding the bar.
+      const w = activity.classWizard;
+      wizardBtn.disabled = !!w;
+      wizardBtn.querySelector('span').textContent = w
+        ? 'Class Creation Wizard (open)'
+        : 'Class Creation Wizard';
+
+      applyEnable();
     }
     function setRunning(v) {
       running = v;
@@ -686,15 +830,15 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     }
 
     // ---- Wire static buttons ----
-    buildBtn.onclick = () => { if (!buildBtn.disabled) { send('build'); } };
+    buildBtn.onclick = () => { if (!buildBtn.disabled) { send(buildBtn.dataset.cmd === 'stopBuild' ? 'stopBuild' : 'build'); } };
     runBtn.onclick = () => { if (!runBtn.disabled) { send(runBtn.dataset.cmd === 'stop' ? 'stop' : 'run'); } };
-    document.getElementById('runDebug').onclick = () => send('runDebug');
+    debugBtn.onclick = () => { if (!debugBtn.disabled) { send('runDebug'); } };
     document.getElementById('terminal').onclick = () => send('terminal');
     document.getElementById('log').onclick = () => send('log');
     document.getElementById('editorLog').onclick = () => send('editorLog');
     document.getElementById('errorLog').onclick = () => send('errorLog');
     document.getElementById('openSettings').onclick = () => send('openSettings');
-    document.getElementById('classWizard').onclick = () => send('classWizard');
+    wizardBtn.onclick = () => { if (!wizardBtn.disabled) { send('classWizard'); } };
     // Re-scan sits inside the Onboarding header button — stop the click from also
     // toggling the section's collapse.
     document.getElementById('setup-rescan').onclick = (e) => { e.stopPropagation(); sendRescan(); };
@@ -703,6 +847,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       const m = e.data;
       if (!m) { return; }
       if (m.type === 'runState') { setRunning(m.running); }
+      if (m.type === 'jobs') { setJobs(m.activity); }
       if (m.type === 'status') { setStatus(m); }
       if (m.type === 'config') { setConfig(m); }
       if (m.type === 'deps') { setDeps(m.model); }
@@ -712,6 +857,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     setConfig(INITIAL.config);
     setDeps(INITIAL.deps);
     setRunning(INITIAL.running);
+    setJobs(INITIAL.activity);
     setStatus(INITIAL.status);
   </script>
 </body>

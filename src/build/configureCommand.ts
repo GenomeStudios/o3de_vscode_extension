@@ -3,8 +3,8 @@
 //
 //  The shape of the CMake configure invocation and the small bits of build-tree
 //  inspection that back it. Kept free of vscode / I/O so it can be exercised
-//  directly by unit tests and node proofs. The command itself (terminal, MSVC
-//  environment, File API query) lives in configure.ts.
+//  directly by unit tests and node proofs. Running it (MSVC environment, File API
+//  query, the managed command) lives in configure.ts.
 // ============================================================================
 
 import * as path from "path";

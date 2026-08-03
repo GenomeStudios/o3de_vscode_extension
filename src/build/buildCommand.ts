@@ -3,8 +3,8 @@
 //
 //  The shape of the `cmake --build` invocation and the small string helpers the
 //  target picker + tooling view need. Kept free of vscode / I/O so it can be
-//  exercised directly by unit tests. The command itself (terminal, MSVC
-//  environment, process-guard) lives in build.ts; the picker in selectTargets.ts.
+//  exercised directly by unit tests. Running it (MSVC environment, process-guard,
+//  the managed command) lives in buildRun.ts; the picker in selectTargets.ts.
 // ============================================================================
 
 // ---- Build command line ----------------------------------------------------

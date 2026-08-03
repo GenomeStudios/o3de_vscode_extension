@@ -4,9 +4,10 @@
 //  Reproduces the user's reconfigure step natively:
 //    MSVC env (vcvars64) → cmake -G <generator> -S <project> -B build/<platform>
 //                          -DLY_3RDPARTY_PATH=<3rd party>
-//  Runs in a visible terminal (long + verbose; mirrors the .bat), triggered by
-//  the user — configure is not needed every build, only on first setup or when
-//  CMake inputs / the generator change.
+//  Runs as a managed command (streamed to “O3DE Build Output”, cancellable, one
+//  at a time — see managedCommand.ts), triggered by the user: configure is not
+//  needed every build, only on first setup or when CMake inputs / the generator
+//  change.
 //
 //  Before running, a CMake File API query is written so the configure emits a
 //  reply (build/<platform>/.cmake/api/v1/reply). That reply is the data source
@@ -19,7 +20,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { log } from "../log";
-import { freshTerminal } from "./terminals";
+import { commandOutput } from "./commandOutput";
+import { runManagedCommand, describeResult, cancelManagedCommand, managedJob } from "./managedCommand";
 import { ensureVisualStudio } from "../env/visualStudioGuard";
 import { ensureNinja } from "./ninjaGuard";
 import { captureMsvcEnvironmentDelta } from "../env/msvcEnvironment";
@@ -91,27 +93,46 @@ function clearCmakeCache(buildDir: string): void {
   log().info(`Cleared CMake cache in ${buildDir} (generator switch).`);
 }
 
+// ---- Job identity ----------------------------------------------------------
+/** The registry key for a project's configure — one configure per project. */
+export function configureJobKey(projectPath: string): string {
+  return `configure:${projectPath}`;
+}
+
+/** Stop the running configure for the workspace's project. */
+export async function stopConfigure(): Promise<boolean> {
+  const project = await resolveWorkspaceProject("O3DE: Stop Configure");
+  return project ? cancelManagedCommand(configureJobKey(project.path)) : false;
+}
+
 // ---- Command ---------------------------------------------------------------
-export async function configureProject(options: BuildOptions): Promise<void> {
+/** Run the CMake configure. Returns true when it completed successfully. */
+export async function configureProject(options: BuildOptions): Promise<boolean> {
   if (process.platform !== "win32") {
     void vscode.window.showInformationMessage("O3DE: Configure currently targets Windows (MSVC).");
-    return;
+    return false;
   }
 
   const project = await resolveWorkspaceProject("O3DE: Configure Project");
   if (!project) {
-    return;
+    return false;
+  }
+
+  // One configure per project — a second request joins nothing, it just reports.
+  if (managedJob(configureJobKey(project.path))) {
+    void vscode.window.showInformationMessage("O3DE: a configure is already running for this project.");
+    return false;
   }
 
   // Toolchain prerequisites: Visual Studio always; Ninja only for the Ninja generator.
   const vs = await ensureVisualStudio({ interactive: false });
   if (!vs?.vcvars64Path) {
     log().error("Configure aborted — no usable Visual Studio (vcvars64.bat).");
-    return;
+    return false;
   }
   if (options.generator === "Ninja Multi-Config" && !(await ensureNinja({ interactive: true }))) {
     log().error("Configure aborted — Ninja generator selected but Ninja is not installed.");
-    return;
+    return false;
   }
 
   const buildDir = projectBuildDir(project.path);
@@ -126,7 +147,7 @@ export async function configureProject(options: BuildOptions): Promise<void> {
       "Cancel",
     );
     if (choice !== "Configure Fresh") {
-      return;
+      return false;
     }
     clearCmakeCache(buildDir);
   } else if (cachedGenerator) {
@@ -136,7 +157,7 @@ export async function configureProject(options: BuildOptions): Promise<void> {
       "Cancel",
     );
     if (choice !== "Reconfigure") {
-      return;
+      return false;
     }
   }
 
@@ -153,18 +174,18 @@ export async function configureProject(options: BuildOptions): Promise<void> {
     log().warn(`Could not write CMake File API query: ${String(err)}`);
   }
 
-  const command = formatCommand(
-    buildConfigureArgs({
-      projectPath: project.path,
-      buildDir,
-      generator: options.generator,
-      thirdPartyPath,
-      compiler: options.compiler,
-      extraCacheArgs: readConfigureArgs(project.path),
-    }),
-  );
+  const argv = buildConfigureArgs({
+    projectPath: project.path,
+    buildDir,
+    generator: options.generator,
+    thirdPartyPath,
+    compiler: options.compiler,
+    extraCacheArgs: readConfigureArgs(project.path),
+  });
+  const command = formatCommand(argv);
 
-  // MSVC environment (equivalent to `call vcvars64.bat`) applied to the terminal.
+  // MSVC environment (equivalent to `call vcvars64.bat`) — the thing CMake Tools
+  // cannot establish for an O3DE project, and the reason we run cmake ourselves.
   let env: Record<string, string>;
   try {
     env = await captureMsvcEnvironmentDelta(vs.vcvars64Path);
@@ -174,12 +195,38 @@ export async function configureProject(options: BuildOptions): Promise<void> {
     void vscode.window.showErrorMessage(
       "O3DE: failed to establish the Visual Studio environment (see the O3DE log).",
     );
-    return;
+    return false;
   }
 
+  const label = `Configure ${project.projectName}`;
   log().info(`Configuring ${project.projectName} → ${buildDir}`);
-  log().info(`  ${command}`);
-  const terminal = freshTerminal("O3DE Configure", env);
-  terminal.show();
-  terminal.sendText(command);
+  log().info(`  ${command} (streaming to “O3DE Build Output”)`);
+
+  const result = await runManagedCommand({
+    key: configureJobKey(project.path),
+    kind: "configure",
+    label,
+    argv,
+    cwd: project.path, // the source dir; -B creates the build tree
+    env: { ...process.env, ...env },
+  });
+
+  log().info(describeResult(label, result));
+
+  if (result.cancelled) {
+    void vscode.window.showInformationMessage("O3DE: configure stopped.");
+    return false;
+  }
+  if (result.exitCode === 0) {
+    void vscode.window.showInformationMessage(`O3DE: ${project.projectName} configured (${options.generator}).`);
+    return true;
+  }
+  void vscode.window
+    .showErrorMessage("O3DE: configure failed — see the output for details.", "Show Output")
+    .then((choice) => {
+      if (choice === "Show Output") {
+        commandOutput().show(true);
+      }
+    });
+  return false;
 }

@@ -48,6 +48,8 @@ export interface BuildResult {
   summary: string; // one-line human read-out
   rawTail: string; // last N lines — the safety net when a matcher misses
   blocked?: BuildBlockedReason;
+  /** True when the user stopped the build (distinct from "it ran and failed"). */
+  cancelled?: boolean;
 }
 
 // ---- Matchers --------------------------------------------------------------
@@ -143,4 +145,14 @@ export function tailLines(output: string, n: number): string {
 export function summarize(ok: boolean, errors: number, warnings: number, durationMs: number): string {
   const verb = ok ? "succeeded" : "FAILED";
   return `Build ${verb} — ${errors} error(s), ${warnings} warning(s) in ${(durationMs / 1000).toFixed(1)}s`;
+}
+
+/**
+ * The read-out for a user-stopped build. Kept separate from summarize() so a
+ * cancellation never reads as a compile failure — the diagnostics collected
+ * before the kill are real but incomplete, and callers must not treat them as a
+ * verdict on the code.
+ */
+export function summarizeCancelled(durationMs: number): string {
+  return `Build stopped by the user after ${(durationMs / 1000).toFixed(1)}s — results are incomplete`;
 }

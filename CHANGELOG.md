@@ -3,6 +3,82 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — 2026-07-21
+
+### Changed
+
+- **Build, Configure and the Class Creation Wizard no longer use a terminal.** They now run
+  as *managed commands*: the extension spawns them directly with the Visual Studio (MSVC)
+  environment it establishes itself, and streams their output to a new **O3DE Build Output**
+  channel. Integrated terminals were only ever used because CMake Tools cannot set up the
+  MSVC environment for an O3DE project — that reason is gone, so the terminals are too.
+  What you get:
+  - **No more piled-up terminals**, and no more rival builds. A second Build while one is
+    running joins the running job instead of starting a competing `cmake` on the same build
+    tree. (Disposing a terminal never reliably killed *grandchildren* — `cmake` → `ninja` →
+    `cl.exe` — so re-running could leave orphaned compilers behind. It now kills the tree.)
+  - **A progress bar in the panel**, directly under Build/Run: the newest line of build
+    output with the percentage beside it, over a bar filled from ninja's `[n/m]` output.
+    It shows for Build and Configure, and sweeps instead of guessing a percentage when the
+    generator reports no counts.
+  - **The Build button becomes a Stop Build button while a build runs**, mirroring Run/Stop.
+    Pressing Build (or its hotkey) mid-build stops it — the replacement for a terminal's
+    Ctrl+C — and kills the whole process tree. A new **O3DE: Stop Build** command does the
+    same from the palette. No progress notification is shown: the panel's bar and button
+    are the progress and stop controls, so there's no toast whose only button is one that
+    kills your build.
+  - **Readable output.** Progress lines are throttled to a heartbeat while warnings, errors
+    and CMake/linker messages always pass through immediately, so a full engine build no
+    longer buries the few lines that matter. The complete raw output is still parsed for
+    diagnostics — nothing is lost to the shaping.
+  - **Builds you start are visible to the LLM endpoint.** The tab's Build now registers the
+    same job MCP does, so `o3de_build_status` / `o3de_build_log` report on it too.
+  - **Guards against overlapping operations.** **Run** and **Run in Debug** grey out while a
+    build is running — mid-link the binaries are half-written, so launching then either fails
+    or silently loads the previous build and reads as a bug in your code. **Build** greys out
+    while a Configure is running, since that Configure is rewriting the CMake cache the build
+    would read. Both rules are enforced in the commands themselves, not just the buttons, so
+    a hotkey, the palette, and the MCP `o3de_run` tool all respect them. **Stop is never
+    blocked** — force-quitting the Editor mid-build is precisely what unblocks a failing link.
+  - **Configure can be stopped from where you started it.** While a configure runs, the
+    **Configure Project** row becomes **■ Stop Configure** (it previously just reported
+    "already running", leaving no way to cancel). A new **O3DE: Stop Configure** command does
+    the same from the palette.
+- **Class Creation Wizard** no longer holds a terminal open for the wizard's whole lifetime.
+  This removes both workarounds it needed: the `&& exit` chained onto the command to close
+  the orphaned terminal (#15), and the `cmd.exe` pin that stopped PowerShell choking on the
+  quoted `python.cmd` path. The button now shows the wizard is open.
+- **`O3DE: Open Developer Terminal` is unchanged** — a terminal with the MSVC environment
+  ready is the point of that command, and it stays the deliberate escape hatch for running
+  commands by hand. Dependency installs (winget) also still use a terminal, where their
+  progress output belongs.
+
+### Added
+
+- **Run Target now offers every executable, not just Editor/GameLauncher.** The Run
+  Target picker discovers every runnable the project can produce, two ways: every
+  **executable CMake target** from the CMake File API reply (offered even before it's
+  built, marked "not built — build it first"), and every **exe actually present** in
+  `build/<platform>/bin/<config>/` (so a freshly built tool — e.g. `O3DEQtControlGallery`
+  — appears even without a fresh Configure). Editor and GameLauncher stay pinned on top
+  with their special resolution (engine-aware Editor, `<Project>.GameLauncher.exe`), and
+  a **Custom executable…** row covers anything the extension can't see yet. Run, **Run in
+  Debug**, the Run/Stop toolbar toggle, and the LLM tools (`o3de_run`,
+  `o3de_set_config runTarget`) all accept the same open set; `o3de_list_targets` now
+  reports the runnable subset in a new `executables` field. Custom targets launch with
+  only your Launch Options — no injected args (apps in the project build output locate
+  their project from the registry files deployed beside them; only the Editor needs an
+  explicit `--project-path`).
+- **Environment Report** — a new **O3DE: Copy Environment Report** command copies a
+  Markdown diagnostic snapshot to the clipboard (OS/distro, the full toolchain detector
+  matrix, the resolved engine/project, current build selections, and resolved exe paths
+  with exists? markers). Built to make remote bug reports — especially from Linux testers
+  — self-diagnosing. Runs on every platform.
+- **Experimental Linux support flag** — a new `o3de.experimental.linuxSupport` setting
+  (per-project, **off by default**) that will gate the forthcoming Linux build/run/debug
+  paths, so they can ship dormant in normal releases and be activated only by testers.
+  No behavior change yet — the Linux paths land in later updates.
+
 ## [0.2.0] — 2026-07-20
 
 ### Added

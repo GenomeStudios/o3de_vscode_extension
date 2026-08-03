@@ -32,6 +32,12 @@ export interface LoadedTarget {
   sourcePaths: string[]; // C/C++ sources listed for the target (relative to project root, or absolute)
 }
 
+/** An EXECUTABLE target — a runnable the Run Target picker can offer. */
+export interface ExecutableTarget {
+  name: string; // CMake target name, e.g. "O3DEQtControlGallery"
+  artifact?: string; // build-dir-relative output, e.g. "bin/profile/O3DEQtControlGallery.exe"
+}
+
 export interface FileApiReply {
   configName: string;
   compilerPath?: string; // CXX compiler (cl.exe) for c_cpp_properties.compilerPath
@@ -56,6 +62,9 @@ interface CompileGroup {
   languageStandard?: { standard?: string };
 }
 interface TargetJson {
+  name?: string;
+  type?: string; // EXECUTABLE | STATIC_LIBRARY | MODULE_LIBRARY | UTILITY | …
+  artifacts?: { path: string }[];
   compileGroups?: CompileGroup[];
   sources?: { path: string }[];
 }
@@ -121,6 +130,14 @@ const CODE_SOURCE = /\.(c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx|inl|ipp|tpp)$/i;
  *  compile group — this is how we map a project's own files to their target's config). */
 export function parseTargetSourcePaths(json: TargetJson): string[] {
   return (json.sources ?? []).map((s) => s.path).filter((p) => CODE_SOURCE.test(p));
+}
+
+/** An EXECUTABLE target's name + artifact from a per-target reply, else undefined. */
+export function parseExecutableTarget(json: TargetJson): ExecutableTarget | undefined {
+  if (json.type !== "EXECUTABLE" || !json.name) {
+    return undefined;
+  }
+  return { name: json.name, artifact: json.artifacts?.[0]?.path };
 }
 
 /** The CXX compiler path (cl.exe) from the toolchains reply. */
@@ -229,4 +246,38 @@ export function loadTargetNames(replyDir: string, configName: string): string[] 
   }
   const codemodel = readJson<CodemodelJson>(path.join(replyDir, codemodelName));
   return codemodel ? parseTargetNames(codemodel, configName) : [];
+}
+
+/**
+ * Every EXECUTABLE target for a config — the candidates the Run Target picker
+ * offers. This one DOES read the per-target files (target type/artifacts only
+ * live there), but they are small (tens of KB each) so a picker-open read of
+ * the whole reply stays well under a second even on a source-engine tree.
+ */
+export function loadExecutableTargets(replyDir: string, configName: string): ExecutableTarget[] {
+  const indexFile = latestIndexFile(replyDir);
+  if (!indexFile) {
+    return [];
+  }
+  const index = readJson<IndexJson>(indexFile);
+  const codemodelName = (index?.objects ?? []).find((o) => o.kind === "codemodel")?.jsonFile;
+  if (!codemodelName) {
+    return [];
+  }
+  const codemodel = readJson<CodemodelJson>(path.join(replyDir, codemodelName));
+  const config = codemodel ? pickConfiguration(codemodel, configName) : undefined;
+  if (!config) {
+    return [];
+  }
+  const out: ExecutableTarget[] = [];
+  const seen = new Set<string>();
+  for (const target of config.targets) {
+    const json = readJson<TargetJson>(path.join(replyDir, target.jsonFile));
+    const exe = json ? parseExecutableTarget(json) : undefined;
+    if (exe && !seen.has(exe.name)) {
+      seen.add(exe.name);
+      out.push(exe);
+    }
+  }
+  return out;
 }

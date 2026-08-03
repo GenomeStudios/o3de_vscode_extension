@@ -14,7 +14,7 @@ import * as vscode from "vscode";
 import { readProject, O3deProject } from "../o3de/identity";
 import { fileApiReplyDir, projectBuildDir } from "./configureCommand";
 import { curatedTargets } from "./buildCommand";
-import { loadTargetNames } from "../intellisense/fileApi";
+import { loadTargetNames, loadExecutableTargets } from "../intellisense/fileApi";
 import { isConfiguredFor } from "./configure";
 import {
   BuildOptions,
@@ -36,6 +36,8 @@ export interface ConfigSnapshot {
   targets: string[]; // empty = build everything
   runTarget: RunTarget;
   launchArgs: string;
+  // runTargets lists only the two always-valid values — any executable target
+  // name (o3de_list_targets → executables) is also accepted as a runTarget.
   options: { generators: Generator[]; compilers: Compiler[]; configs: BuildConfig[]; runTargets: RunTarget[] };
   project?: { name: string; path: string; buildDir: string; configuredForGenerator: boolean };
 }
@@ -108,6 +110,7 @@ export interface TargetList {
   configured: boolean;
   curated: string[]; // Editor + <Project>.GameLauncher — the common picks
   targets: string[]; // every real CMake target for the config (from the File API reply)
+  executables: string[]; // the runnable subset (EXECUTABLE targets) — valid runTarget values
   note?: string;
 }
 
@@ -116,17 +119,26 @@ export function listTargets(buildOptions: BuildOptions, config?: BuildConfig): T
   const project = firstProject();
   const cfg = config ?? buildOptions.config;
   if (!project) {
-    return { config: cfg, configured: false, curated: [], targets: [], note: "No O3DE project in this workspace." };
+    return {
+      config: cfg,
+      configured: false,
+      curated: [],
+      targets: [],
+      executables: [],
+      note: "No O3DE project in this workspace.",
+    };
   }
   const curated = curatedTargets(project.projectName);
   const replyDir = fileApiReplyDir(project.path);
   const configured = fs.existsSync(replyDir);
   const targets = configured ? loadTargetNames(replyDir, cfg) : [];
+  const executables = configured ? loadExecutableTargets(replyDir, cfg).map((t) => t.name) : [];
   return {
     config: cfg,
     configured,
     curated,
     targets,
+    executables,
     note: configured ? undefined : "Not configured yet — run “O3DE: Configure Project” to list all targets.",
   };
 }

@@ -1,25 +1,29 @@
 // ============================================================================
-//  Build — run `cmake --build` for the selected target(s) (build_launch B.3).
+//  Build (interactive) — the tab's Build button and “O3DE: Build”.
 //
-//  Replaces the user's build .bats natively:
-//    MSVC env (vcvars64) → process-guard (locked gem DLLs) →
-//    cmake --build build/<platform> --target <selected…> --config <config>
-//  The target(s) and config come from BuildOptions (shown/edited in the O3DE tab).
-//  Runs in a visible terminal (long + verbose, like the .bat) and requires the
-//  project to be configured first (CMake refuses to build an unconfigured tree).
+//  A thin POLICY wrapper over the shared core in buildRun.ts. The core owns the
+//  preconditions and the actual cmake invocation; this file owns only what makes
+//  the interactive path different from the MCP one:
+//    - ask which project when the workspace holds several;
+//    - turn each BuildBlockedReason into the right prompt or message;
+//    - report the outcome (and reveal the output channel on failure).
+//
+//  No terminal: the build streams to the “O3DE Build Output” channel and is
+//  stopped from the tab's Build/Stop toggle (see buildState.ts) or the progress
+//  notification. Replaces the user's build .bats natively.
 // ============================================================================
 
 import * as vscode from "vscode";
 import { log } from "../log";
-import { freshTerminal } from "./terminals";
-import { ensureVisualStudio } from "../env/visualStudioGuard";
-import { captureMsvcEnvironmentDelta } from "../env/msvcEnvironment";
+import { commandOutput } from "./commandOutput";
 import { BuildOptions } from "./buildOptions";
 import { resolveWorkspaceProject } from "./projectResolve";
-import { projectBuildDir, formatCommand } from "./configureCommand";
-import { buildBuildArgs, targetsLabel } from "./buildCommand";
-import { isConfiguredFor, configureProject } from "./configure";
-import { guardEditorProcesses } from "./processGuard";
+import { targetsLabel } from "./buildCommand";
+import { configureProject } from "./configure";
+import { buildJobKey } from "./buildRun";
+import { startBuildJob } from "./buildJobs";
+import { cancelManagedCommand, managedJob } from "./managedCommand";
+import { BuildResult } from "./buildOutput";
 
 // ---- Command ---------------------------------------------------------------
 export async function buildProject(options: BuildOptions): Promise<void> {
@@ -33,19 +37,49 @@ export async function buildProject(options: BuildOptions): Promise<void> {
     return;
   }
 
-  const vs = await ensureVisualStudio({ interactive: false });
-  if (!vs?.vcvars64Path) {
-    log().error("Build aborted — no usable Visual Studio (vcvars64.bat).");
-    void vscode.window.showErrorMessage("O3DE: Build needs Visual Studio (MSVC). See the O3DE log.");
+  log().info(`Building ${project.projectName} — targets=[${targetsLabel(options.targets)}], config=${options.config}`);
+
+  // Registered as a BuildJob (not called directly) so an assistant asking
+  // o3de_build_status / o3de_build_log sees the build the user just started.
+  const result = await startBuildJob({
+    generator: options.generator,
+    config: options.config,
+    targets: options.targets,
+    coreCount: options.coreCount,
+    interactive: true,
+    project,
+  }).done;
+
+  if (result.blocked) {
+    await reportBlocked(result, options);
     return;
   }
+  reportOutcome(result);
+}
 
-  // The tree must already be configured (with the selected generator) — CMake can't
-  // build otherwise, and File API / targets come from that configure. Offer to run it.
-  if (!isConfiguredFor(project, options.generator)) {
+/** Stop the running build for the workspace's project (its whole process tree). */
+export async function stopBuild(): Promise<boolean> {
+  const project = await resolveWorkspaceProject("O3DE: Stop Build");
+  if (!project) {
+    return false;
+  }
+  return cancelManagedCommand(buildJobKey(project.path));
+}
+
+/** Is a build running for the given project? (Cheap; no prompt.) */
+export function isBuildRunning(projectPath: string): boolean {
+  return managedJob(buildJobKey(projectPath)) !== undefined;
+}
+
+// ---- Blocked-precondition policy -------------------------------------------
+// The core reports WHY it could not build; the interactive path decides what to
+// do about it. Only "not-configured" is recoverable in one click.
+async function reportBlocked(result: BuildResult, options: BuildOptions): Promise<void> {
+  log().info(`Build not started — ${result.summary}`);
+
+  if (result.blocked === "not-configured") {
     const choice = await vscode.window.showWarningMessage(
-      `${project.projectName} isn't configured for "${options.generator}". Configure first, ` +
-        "then run Build again once it finishes.",
+      `${result.summary} Configure first, then run Build again once it finishes.`,
       "Configure Now",
       "Cancel",
     );
@@ -55,35 +89,46 @@ export async function buildProject(options: BuildOptions): Promise<void> {
     return;
   }
 
-  // Process-guard: a running Editor/ScriptCanvas locks gem DLLs → link fails mid-build.
-  if (!(await guardEditorProcesses())) {
-    log().info("Build cancelled by the process-guard.");
+  if (result.blocked === "busy") {
+    void vscode.window.showInformationMessage(
+      "O3DE: a build is already running — use Stop Build to cancel it.",
+      "Show Output",
+    ).then((choice) => {
+      if (choice === "Show Output") {
+        commandOutput().show(true);
+      }
+    });
     return;
   }
 
-  const buildDir = projectBuildDir(project.path);
-  const command = formatCommand(
-    buildBuildArgs({ buildDir, config: options.config, targets: options.targets, coreCount: options.coreCount }),
-  );
-
-  // MSVC environment (equivalent to `call vcvars64.bat`) applied to the terminal.
-  let env: Record<string, string>;
-  try {
-    env = await captureMsvcEnvironmentDelta(vs.vcvars64Path);
-  } catch (err) {
-    const e = err as { message?: string };
-    log().error(`Failed to establish MSVC environment: ${e.message ?? String(err)}`);
-    void vscode.window.showErrorMessage(
-      "O3DE: failed to establish the Visual Studio environment (see the O3DE log).",
-    );
+  // editor-running is already handled interactively by the core's process-guard
+  // (the user chose Cancel), so it needs no second dialog.
+  if (result.blocked === "editor-running") {
     return;
   }
 
-  log().info(
-    `Building ${project.projectName} — targets=[${targetsLabel(options.targets)}], config=${options.config}`,
-  );
-  log().info(`  ${command}`);
-  const terminal = freshTerminal("O3DE Build", env);
-  terminal.show();
-  terminal.sendText(command);
+  void vscode.window.showErrorMessage(`O3DE: ${result.summary}`);
+}
+
+// ---- Outcome ---------------------------------------------------------------
+function reportOutcome(result: BuildResult): void {
+  if (result.cancelled) {
+    void vscode.window.showInformationMessage("O3DE: build stopped.");
+    return;
+  }
+  if (result.ok) {
+    const warn = result.warnings.length > 0 ? ` (${result.warnings.length} warning(s))` : "";
+    void vscode.window.showInformationMessage(`O3DE: ${result.summary.replace(/^Build /, "build ")}${warn}`);
+    return;
+  }
+  // Failed: lead with the first real diagnostic — it's what the user needs.
+  const first = result.errors[0];
+  const detail = first ? `${first.code ?? ""} ${first.message}`.trim() : "see the output for details";
+  void vscode.window
+    .showErrorMessage(`O3DE: build failed — ${detail}`, "Show Output")
+    .then((choice) => {
+      if (choice === "Show Output") {
+        commandOutput().show(true);
+      }
+    });
 }

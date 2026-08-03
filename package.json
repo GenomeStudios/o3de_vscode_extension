@@ -79,6 +79,12 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "When LLM connections are enabled, automatically write/merge the `o3de` server entry into your project's `.mcp.json` (created if absent, other servers preserved) so a client like Claude Code finds it with no copy-paste. Disabling LLM connections removes the entry again. Turn this off to manage `.mcp.json` yourself (use **O3DE: Show LLM Connection Info** to copy the block)."
+        },
+        "o3de.experimental.linuxSupport": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "markdownDescription": "**(Experimental) Enable Linux build/run/debug paths.** Off by default. When off, O3DE build/configure/run behave as they do today (Windows-focused); on Linux the affected commands report that they target Windows. Turn **on** to activate the experimental Linux toolchain paths (gcc/clang + Ninja, no MSVC) — intended for testers helping validate Linux support. Per-project (stored in `.vscode/settings.json`). Use **O3DE: Copy Environment Report** when filing a Linux bug so the report is self-diagnosing."
         }
       }
     },
@@ -177,9 +183,19 @@
         "title": "O3DE: Configure Project"
       },
       {
+        "command": "o3de.stopConfigure",
+        "title": "O3DE: Stop Configure",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "o3de.build",
         "title": "O3DE: Build",
         "icon": "$(tools)"
+      },
+      {
+        "command": "o3de.stopBuild",
+        "title": "O3DE: Stop Build",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "o3de.selectTargets",
@@ -271,6 +287,11 @@
       {
         "command": "o3de.llm.showConnectionInfo",
         "title": "O3DE: Show LLM Connection Info"
+      },
+      {
+        "command": "o3de.copyEnvironmentReport",
+        "title": "O3DE: Copy Environment Report",
+        "icon": "$(clippy)"
       }
     ],
     "breakpoints": [

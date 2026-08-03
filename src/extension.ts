@@ -27,19 +27,24 @@ import {
   setProjectEnabled,
 } from "./workspace/projectScope";
 import { writeProjectConfig } from "./build/writeProjectConfig";
-import { configureProject } from "./build/configure";
-import { buildProject } from "./build/build";
+import { configureProject, stopConfigure } from "./build/configure";
+import { buildProject, stopBuild } from "./build/build";
 import { selectTargets } from "./build/selectTargets";
+import { selectRunTarget } from "./build/selectRunTarget";
+import { customRunImage } from "./build/runCommand";
 import { runProject, stopRun } from "./build/run";
 import { forceCloseRuntime } from "./build/runQuery";
 import { runInDebug } from "./build/runDebug";
 import { RunState } from "./build/runState";
+import { BuildState } from "./build/buildState";
+import { initCommandOutput } from "./build/commandOutput";
 import { generateCppProperties, refreshCppPropertiesOnStartup } from "./intellisense/generate";
 import { registerConfigurationProvider } from "./intellisense/provider";
 import { registerLuaDebug, debugLuaFile } from "./lua/debug/debugAdapter";
 import { registerLuaHandoff } from "./lua/handoff";
 import { generateLuaIntelliSense, generateLuaStubsFromDump } from "./lua/intellisense/intelliSense";
 import { launchClassWizard } from "./tools/classWizard";
+import { copyEnvironmentReport } from "./platform/environmentReport";
 import { LuaPaletteViewProvider, LUA_PALETTE_VIEW_ID } from "./lua/palette/luaPaletteProvider";
 import { AdvancedViewProvider } from "./view/advancedView";
 import { EXTENSION_ID } from "./constants";
@@ -50,16 +55,17 @@ import {
   GENERATORS,
   BUILD_CONFIGS,
   COMPILERS,
-  RUN_TARGETS,
   Generator,
   BuildConfig,
   Compiler,
-  RunTarget,
 } from "./build/buildOptions";
 
 // ---- Activation ------------------------------------------------------------
 export function activate(context: vscode.ExtensionContext): void {
   initLog(context);
+  // The plain channel that raw build/configure/tool output streams to. Separate
+  // from log() so cmake and ninja read verbatim, undecorated by log levels.
+  initCommandOutput(context);
   log().info("O3DE Development Tools activated.");
   log().show(true); // reveal our Output channel (dev convenience; keeps focus)
 
@@ -75,9 +81,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const deps = new DependencyStatus(context.workspaceState);
   void deps.refresh();
 
-  // Live run state (Editor / GameLauncher up?) — toggles the toolbar's single
-  // Run slot between Play and Stop via the `o3de.appRunning` context key.
-  const runState = new RunState();
+  // Live run state (Editor / GameLauncher / custom run target up?) — toggles the
+  // toolbar's single Run slot between Play and Stop via `o3de.appRunning`.
+  const runState = new RunState(() => {
+    const extra = customRunImage(buildOptions.runTarget);
+    return extra ? [extra] : [];
+  });
+
+  // Live build state (is a managed command running?) — flips the tab's Build slot
+  // between Build and Stop Build and carries the progress fill. Event-only: the
+  // managed-command registry is in-process, so unlike RunState it needs no poll.
+  const buildState = new BuildState();
 
   // LLM connections — a localhost MCP endpoint an assistant (e.g. Claude) uses to
   // trigger builds and read structured results. Off by default; the MCP SDK is
@@ -278,6 +292,13 @@ export function activate(context: vscode.ExtensionContext): void {
     void vscode.commands.executeCommand("workbench.action.openSettings", `@ext:${EXTENSION_ID}`);
   });
 
+  // Command: "O3DE: Copy Environment Report" — a diagnostic snapshot for remote
+  // (esp. Linux) bug reports. Copies OS/toolchain/engine/resolved-path state to
+  // the clipboard so a tester's "it didn't work" arrives self-diagnosing.
+  const copyEnvReport = vscode.commands.registerCommand("o3de.copyEnvironmentReport", () => {
+    void copyEnvironmentReport(deps, buildOptions, context.extension.packageJSON.version as string);
+  });
+
   // Commands: open the O3DE project's runtime logs (Editor.log / Error.log).
   const showEditorLog = vscode.commands.registerCommand("o3de.showEditorLog", () => {
     void openEditorLog();
@@ -318,14 +339,42 @@ export function activate(context: vscode.ExtensionContext): void {
     void writeProjectConfig(buildOptions);
   });
 
-  // Command: "O3DE: Configure Project" — run the CMake configure (build/<platform>) in an MSVC terminal.
+  // Command: "O3DE: Configure Project" — run the CMake configure (build/<platform>)
+  // with the MSVC environment, streamed to the O3DE Build Output channel.
   const configure = vscode.commands.registerCommand("o3de.configureProject", () => {
     void configureProject(buildOptions);
   });
 
-  // Command: "O3DE: Build" — cmake --build for the selected target(s) + config (MSVC env + process-guard).
-  const build = vscode.commands.registerCommand("o3de.build", () => {
-    void buildProject(buildOptions);
+  // Command: "O3DE: Stop Configure" — cancel the running configure + its tree.
+  // The Configure row in the tab switches to this while one is in flight, so the
+  // same control that started it stops it (as Build/Stop Build does).
+  const stopConfigureCmd = vscode.commands.registerCommand("o3de.stopConfigure", async () => {
+    if (!(await stopConfigure())) {
+      void vscode.window.showInformationMessage("O3DE: no configure is running.");
+    }
+  });
+
+  // Command: "O3DE: Build" — cmake --build for the selected target(s) + config
+  // (MSVC env + process-guard), streamed to the O3DE Build Output channel.
+  //
+  // A toggle, like Run: a second Build while one is running is never useful (the
+  // job registry refuses it), so pressing Build (or its hotkey) mid-build stops
+  // it instead — the replacement for the Ctrl+C a terminal used to give. Unlike
+  // Run's opt-in `run.toggleToQuit`, this is unconditional; a non-toggling Build
+  // button would just sit dead for the length of a build.
+  const build = vscode.commands.registerCommand("o3de.build", async () => {
+    if (buildState.isBuilding) {
+      await stopBuild();
+    } else {
+      await buildProject(buildOptions);
+    }
+  });
+
+  // Command: "O3DE: Stop Build" — cancel the running build + its process tree.
+  const stopBuildCmd = vscode.commands.registerCommand("o3de.stopBuild", async () => {
+    if (!(await stopBuild())) {
+      void vscode.window.showInformationMessage("O3DE: no build is running.");
+    }
   });
 
   // Command: "O3DE: Run" — a toggle (setting-gated). The Editor can't run twice, so
@@ -402,14 +451,9 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // Commands: choose what Run launches + the launch options (shown in the tab, persisted).
-  const selectRunTarget = vscode.commands.registerCommand("o3de.selectRunTarget", async () => {
-    const pick = await vscode.window.showQuickPick(RUN_TARGETS, {
-      title: "O3DE: Run Target",
-      placeHolder: `Current: ${buildOptions.runTarget}`,
-    });
-    if (pick) {
-      await buildOptions.setRunTarget(pick as RunTarget);
-    }
+  // The run-target picker discovers every executable target (File API + built exes).
+  const selectRunTargetCmd = vscode.commands.registerCommand("o3de.selectRunTarget", () => {
+    void selectRunTarget(buildOptions);
   });
   const setLaunchArgs = vscode.commands.registerCommand("o3de.setLaunchArgs", async () => {
     const value = await vscode.window.showInputBox({
@@ -459,6 +503,7 @@ export function activate(context: vscode.ExtensionContext): void {
     DashboardViewProvider.viewType,
     new DashboardViewProvider(
       runState,
+      buildState,
       onboarding,
       buildOptions,
       deps,
@@ -522,6 +567,7 @@ export function activate(context: vscode.ExtensionContext): void {
     onboarding,
     deps,
     runState,
+    buildState,
     mcpServer,
     configListener,
     llmEnable,
@@ -533,6 +579,7 @@ export function activate(context: vscode.ExtensionContext): void {
     helloWorld,
     showLog,
     openSettings,
+    copyEnvReport,
     checkVs,
     openTerm,
     checkNinja,
@@ -540,7 +587,9 @@ export function activate(context: vscode.ExtensionContext): void {
     addGems,
     writeConfig,
     configure,
+    stopConfigureCmd,
     build,
+    stopBuildCmd,
     run,
     runDebug,
     stop,
@@ -550,7 +599,7 @@ export function activate(context: vscode.ExtensionContext): void {
     selectCompiler,
     classWizard,
     selectTargetsCmd,
-    selectRunTarget,
+    selectRunTargetCmd,
     setLaunchArgs,
     setCoreCount,
     showEditorLog,

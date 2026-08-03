@@ -17,8 +17,29 @@ import { BuildOptions, RunTarget } from "./buildOptions";
 import { O3deProject } from "../o3de/identity";
 import { resolveProjectEngine } from "../o3de/discovery";
 import { resolveWorkspaceProject } from "./projectResolve";
-import { runArgsFor, projectRuntimeExe, gameLauncherExeName, editorExeCandidates } from "./runCommand";
+import { runArgsFor, projectRuntimeExe, runTargetExeName, gameLauncherExeName, editorExeCandidates } from "./runCommand";
+import { runningJobOfKind } from "./managedCommand";
 import * as runManager from "./runManager";
+
+// ---- Build-in-flight guard -------------------------------------------------
+/**
+ * Why launching must be refused right now, or undefined when it's safe.
+ *
+ * The mirror of the process-guard: that one stops a build while the Editor holds
+ * gem DLLs, this one stops a launch while the build is still writing them. Mid-
+ * link the exe and its gem DLLs are inconsistent, so an app started now either
+ * fails to load or loads half of the previous build — which then reads as a bug
+ * in the code rather than in the timing.
+ *
+ * Shared by every launch path (Run, Run in Debug, and MCP o3de_run) so the rule
+ * cannot be sidestepped by a hotkey or an assistant.
+ */
+export function buildInFlightReason(): string | undefined {
+  const job = runningJobOfKind("build");
+  return job
+    ? `${job.label} is still running — its binaries are being written. Stop the build (or wait for it) before launching.`
+    : undefined;
+}
 
 // ---- Runtime-exe resolution (SDK engine → engine prebuilt; source → project build) ----
 function resolveEditorExe(project: O3deProject, config: string): string {
@@ -26,17 +47,22 @@ function resolveEditorExe(project: O3deProject, config: string): string {
   return candidates.find((c) => fs.existsSync(c)) ?? candidates[0];
 }
 
-/** Resolve the exe to launch for a run target (SDK engine → engine prebuilt; source → project build). */
+/**
+ * Resolve the exe to launch for a run target. The Editor is engine-aware (SDK
+ * engine → engine prebuilt; source → project build); every other target —
+ * GameLauncher or any executable target picked in the Run Target picker — is
+ * its exe in the project's build output.
+ */
 export function resolveRunnable(project: O3deProject, target: RunTarget, config: string): string {
   return target === "Editor"
     ? resolveEditorExe(project, config)
-    : projectRuntimeExe(project.path, config, gameLauncherExeName(project.projectName));
+    : projectRuntimeExe(project.path, config, runTargetExeName(target, project.projectName));
 }
 
 // ---- Diagnostics: log HOW we resolved the exe (SDK vs source + candidates) --
 function logRunResolution(project: O3deProject, target: RunTarget, config: string): void {
   if (target !== "Editor") {
-    log().info(`Run target: GameLauncher → project build output.`);
+    log().info(`Run target: ${target} → project build output.`);
     return;
   }
   const engine = resolveProjectEngine(project);
@@ -54,6 +80,12 @@ function logRunResolution(project: O3deProject, target: RunTarget, config: strin
 export async function runProject(options: BuildOptions): Promise<void> {
   if (process.platform !== "win32") {
     void vscode.window.showInformationMessage("O3DE: Run currently targets Windows.");
+    return;
+  }
+
+  const blocked = buildInFlightReason();
+  if (blocked) {
+    void vscode.window.showWarningMessage(`O3DE: ${blocked}`);
     return;
   }
 

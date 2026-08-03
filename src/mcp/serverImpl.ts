@@ -349,16 +349,20 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
     {
       title: "O3DE Run",
       description:
-        "Launch the run target (Editor or GameLauncher) detached — the 'run' half of a build-and-run flow — using " +
-        "the O3DE panel's run target, config, and launch args unless overridden. Returns IMMEDIATELY once launched " +
-        "(it does not block); use o3de_is_running to confirm it is up. The exe must be built first (o3de_build the " +
-        "run target). If an app is already running for the project it is left alone (alreadyRunning) — this tool " +
-        "never force-closes a running app; stopping stays a user action in the O3DE panel. Windows/MSVC only.",
+        "Launch the run target (Editor, GameLauncher, or any executable CMake target) detached — the 'run' half of " +
+        "a build-and-run flow — using the O3DE panel's run target, config, and launch args unless overridden. " +
+        "Returns IMMEDIATELY once launched (it does not block); use o3de_is_running to confirm it is up. The exe " +
+        "must be built first (o3de_build the run target). If an app is already running for the project it is left " +
+        "alone (alreadyRunning) — this tool never force-closes a running app; stopping stays a user action in the " +
+        "O3DE panel. Windows/MSVC only.",
       inputSchema: {
         target: z
-          .enum(["Editor", "GameLauncher"])
+          .string()
           .optional()
-          .describe("Run target to launch. Omit to use the panel selection."),
+          .describe(
+            "Run target to launch: 'Editor', 'GameLauncher', or any executable CMake target name " +
+              "(see o3de_list_targets executables). Omit to use the panel selection.",
+          ),
         config: z
           .enum(["profile", "debug", "release"])
           .optional()
@@ -441,7 +445,12 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
           .array(z.string())
           .optional()
           .describe("CMake target names to build by default; [] = build everything."),
-        runTarget: z.enum(["Editor", "GameLauncher"]).optional(),
+        runTarget: z
+          .string()
+          .optional()
+          .describe(
+            "'Editor', 'GameLauncher', or any executable CMake target name (see o3de_list_targets executables).",
+          ),
         launchArgs: z.string().optional().describe("Extra args passed when running (blank to clear)."),
       },
     },
@@ -460,7 +469,8 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       description:
         "List every buildable CMake target for a config (from the CMake File API reply) so you can build a specific " +
         "gem/target purposefully — beyond the panel's default selection. Pass a name from here to o3de_build (or " +
-        "o3de_set_config targets). Requires the project to have been configured at least once.",
+        "o3de_set_config targets). The `executables` field lists the runnable subset — valid o3de_run / runTarget " +
+        "values. Requires the project to have been configured at least once.",
       inputSchema: { config: z.enum(["profile", "debug", "release"]).optional().describe("Omit for the current config.") },
     },
     async (args: { config?: BuildConfig }) => {

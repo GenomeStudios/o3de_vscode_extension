@@ -9,8 +9,12 @@
 //  o3de_build_log. The finished result is also persisted to a known file so
 //  diagnostics survive a timed-out call or an extension reload.
 //
-//  Builds are serialized (one at a time) by runBuildHeadless's own lock, so we
+//  Builds are serialized (one at a time) by the managed-command registry, so we
 //  track a single latest job.
+//
+//  BOTH entry points register here — MCP `o3de_build` and the tab's Build button
+//  (build.ts). That is deliberate: it means an assistant asking o3de_build_status
+//  / o3de_build_log sees the build the USER just started, not only its own.
 // ============================================================================
 
 import * as fs from "fs";
@@ -30,6 +34,8 @@ export interface BuildJob {
   params: HeadlessBuildParams;
   result?: BuildResult;
   resultPath?: string; // where the finished result was persisted
+  /** Resolves with the finished result — how the interactive caller awaits it. */
+  done: Promise<BuildResult>;
 }
 
 const RESULT_FILE = "o3de-build-result.json"; // under <project>/user/
@@ -41,14 +47,27 @@ export function startBuildJob(params: HeadlessBuildParams): BuildJob {
   if (latestJob?.state === "running") {
     return latestJob; // one build at a time — hand back the running job
   }
-  const job: BuildJob = { buildId: randomUUID().slice(0, 8), state: "running", startedAt: Date.now(), params };
+  let settle!: (result: BuildResult) => void;
+  const done = new Promise<BuildResult>((resolve) => {
+    settle = resolve;
+  });
+
+  const job: BuildJob = {
+    buildId: randomUUID().slice(0, 8),
+    state: "running",
+    startedAt: Date.now(),
+    params,
+    done,
+  };
   latestJob = job;
+
   void runBuildHeadless(params).then((result) => {
     job.result = result;
     job.state = "done";
     job.finishedAt = Date.now();
     job.resultPath = persistResult(result);
     log().info(`o3de_build[${job.buildId}] ${result.summary}`);
+    settle(result);
   });
   return job;
 }

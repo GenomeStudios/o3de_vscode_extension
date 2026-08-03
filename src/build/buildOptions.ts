@@ -10,11 +10,18 @@ import * as vscode from "vscode";
 
 export type Generator = "Ninja Multi-Config" | "Visual Studio 17 2022";
 export type BuildConfig = "profile" | "debug" | "release";
-export type RunTarget = "Editor" | "GameLauncher";
+/**
+ * What Run launches. "Editor" and "GameLauncher" are special values with their
+ * own exe resolution (engine-aware Editor, <Project>.GameLauncher.exe); any
+ * other string is an executable CMake target / built exe name in the project's
+ * build output (e.g. "O3DEQtControlGallery") — see runTargetExeName.
+ */
+export type RunTarget = string;
 export type Compiler = "MSVC" | "Clang";
 
 export const GENERATORS: Generator[] = ["Ninja Multi-Config", "Visual Studio 17 2022"];
 export const BUILD_CONFIGS: BuildConfig[] = ["profile", "debug", "release"];
+/** The always-offered run targets — the picker adds every discovered executable after these. */
 export const RUN_TARGETS: RunTarget[] = ["Editor", "GameLauncher"];
 export const COMPILERS: Compiler[] = ["MSVC", "Clang"];
 
@@ -61,7 +68,7 @@ export class BuildOptions {
     return typeof stored === "number" && stored > 0 ? Math.floor(stored) : 0;
   }
 
-  /** What the Run command launches (Editor or the project's GameLauncher). */
+  /** What the Run command launches (Editor, GameLauncher, or any executable target name). */
   get runTarget(): RunTarget {
     return this.state.get<RunTarget>(KEY_RUN_TARGET) ?? "Editor";
   }

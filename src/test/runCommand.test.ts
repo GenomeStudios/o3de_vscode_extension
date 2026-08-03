@@ -5,6 +5,9 @@ import {
   runArgsFor,
   projectRuntimeExe,
   gameLauncherExeName,
+  runTargetExeName,
+  customRunImage,
+  orderRunTargets,
   editorExeCandidates,
   runSummary,
   launchArgsLabel,
@@ -25,7 +28,7 @@ suite("runCommand", () => {
     assert.deepStrictEqual(parseLaunchArgs(""), []);
   });
 
-  test("runArgsFor: Editor gets --project-path + options; GameLauncher gets only options", () => {
+  test("runArgsFor: Editor gets --project-path + options; everything else gets only options", () => {
     assert.deepStrictEqual(runArgsFor("Editor", "D:/proj", ""), ["--project-path", "D:/proj"]);
     assert.deepStrictEqual(runArgsFor("Editor", "D:/proj", "+r_displayInfo 1"), [
       "--project-path",
@@ -38,6 +41,49 @@ suite("runCommand", () => {
       "DefaultLevel",
     ]);
     assert.deepStrictEqual(runArgsFor("GameLauncher", "D:/proj", ""), []);
+    // Custom executable targets launch clean — no surprise base args.
+    assert.deepStrictEqual(runArgsFor("O3DEQtControlGallery", "D:/proj", ""), []);
+    assert.deepStrictEqual(runArgsFor("O3DEQtControlGallery", "D:/proj", "--flag x"), ["--flag", "x"]);
+  });
+
+  test("runTargetExeName: special values resolve, custom names get .exe appended once", () => {
+    assert.strictEqual(runTargetExeName("Editor", "GS_Play"), "Editor.exe");
+    assert.strictEqual(runTargetExeName("GameLauncher", "GS_Play"), "GS_Play.GameLauncher.exe");
+    assert.strictEqual(runTargetExeName("O3DEQtControlGallery", "GS_Play"), "O3DEQtControlGallery.exe");
+    assert.strictEqual(runTargetExeName("MyTool.exe", "GS_Play"), "MyTool.exe");
+    assert.strictEqual(runTargetExeName("GS_Play.ServerLauncher", "GS_Play"), "GS_Play.ServerLauncher.exe");
+  });
+
+  test("customRunImage: only custom targets add a probe image", () => {
+    assert.strictEqual(customRunImage("Editor"), undefined);
+    assert.strictEqual(customRunImage("GameLauncher"), undefined);
+    assert.strictEqual(customRunImage("O3DEQtControlGallery"), "O3DEQtControlGallery.exe");
+    assert.strictEqual(customRunImage("MyTool.EXE"), "MyTool.EXE");
+  });
+
+  test("orderRunTargets: API order first, then built-only exes, then the current pick", () => {
+    assert.deepStrictEqual(
+      orderRunTargets(
+        "GS_Play",
+        ["GS_Play.ServerLauncher", "AzTestRunner"], // File API executables
+        ["O3DEQtControlGallery", "AzTestRunner"], // exes on disk (one overlaps)
+        "MyCustomTool", // current selection typed by hand
+      ),
+      ["GS_Play.ServerLauncher", "AzTestRunner", "O3DEQtControlGallery", "MyCustomTool"],
+    );
+  });
+
+  test("orderRunTargets: curated spellings are excluded, dedup is case-insensitive", () => {
+    assert.deepStrictEqual(
+      orderRunTargets(
+        "GS_Play",
+        ["Editor", "GS_Play.GameLauncher", "Tool"],
+        ["GS_Play.GameLauncher", "TOOL"],
+        "GameLauncher",
+      ),
+      ["Tool"],
+    );
+    assert.deepStrictEqual(orderRunTargets("GS_Play", [], [], "Editor"), []);
   });
 
   test("projectRuntimeExe composes <project>/build/<platform>/bin/<config>/<exe>", () => {

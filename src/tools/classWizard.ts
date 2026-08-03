@@ -7,6 +7,13 @@
 //  scaffold). We resolve the project's TARGET engine (project.json `engine` →
 //  manifest), then run that engine's wizard — the one it's registered against,
 //  not whatever copy happens to be open in the workspace.
+//
+//  Runs as a managed command, NOT in a terminal. A terminal was previously held
+//  open for the wizard's entire GUI lifetime, which needed two workarounds that
+//  are now both gone: an `&& exit` chained onto the command to auto-close the
+//  orphaned terminal (issue #15), and a cmd.exe pin via ComSpec so PowerShell
+//  wouldn't choke on the quoted python.cmd path. The launcher's bootstrap output
+//  goes to “O3DE Build Output” instead.
 // ============================================================================
 
 import * as vscode from "vscode";
@@ -16,8 +23,7 @@ import { log } from "../log";
 import { resolveProjectEngine } from "../o3de/discovery";
 import { readProject } from "../o3de/identity";
 import { detectProjectRoot } from "../lua/projectPaths";
-import { freshTerminal } from "../build/terminals";
-import { formatCommand } from "../build/configureCommand";
+import { startManagedCommand, describeResult, managedJob } from "../build/managedCommand";
 
 const WIZARD_REL = path.join("Tools", "ClassCreationWizard", "ClassWizard.py");
 
@@ -56,22 +62,39 @@ export async function launchClassWizard(): Promise<void> {
     return;
   }
 
-  // Run it in a VS Code integrated terminal — same as Build/Configure — so its
-  // bootstrap output is visible in a tab and no stray cmd.exe window pops up.
-  // Pin cmd.exe on Windows: python.cmd is a batch file and the default terminal
-  // may be PowerShell, which needs `&` to run a quoted path; cmd runs it directly.
-  const base = formatCommand([python, script, "--engine-path", engine.path, "--project-path", projectPath]);
-  const shellPath = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : undefined;
-  log().info(`Launching Class Wizard (${engine.engineName}): ${base}`);
+  const key = classWizardJobKey(projectPath);
+  if (managedJob(key)) {
+    void vscode.window.showInformationMessage("O3DE: the Class Creation Wizard is already open.");
+    return;
+  }
 
-  // Auto-close this terminal when the wizard WINDOW closes: the launcher blocks
-  // until the GUI exits, so we chain an `exit` to terminate the shell on a clean
-  // exit — VS Code then disposes the otherwise-orphaned terminal. `call` on
-  // Windows so the .cmd's exit code reaches `&&`; an error exit leaves the
-  // terminal open so the failure stays visible.
-  const command = process.platform === "win32" ? `call ${base} && exit` : `${base} && exit`;
+  const argv = [python, script, "--engine-path", engine.path, "--project-path", projectPath];
+  const label = `Class Wizard (${engine.engineName})`;
+  log().info(`Launching ${label} — output streams to “O3DE Build Output”.`);
 
-  const terminal = freshTerminal("O3DE Class Wizard", undefined, shellPath);
-  terminal.show();
-  terminal.sendText(command);
+  // shell: true ONLY because python.cmd is a batch file — Windows spawn cannot
+  // execute one directly. Nothing here is user-typed, so there is no injection
+  // surface. No `&& exit`, no terminal: the job clears itself when the GUI exits.
+  const job = startManagedCommand({
+    key,
+    kind: "classWizard",
+    label,
+    argv,
+    cwd: projectPath,
+    shell: process.platform === "win32",
+  });
+
+  void job.done.then((result) => {
+    log().info(describeResult(label, result));
+    if (!result.cancelled && result.exitCode !== 0) {
+      void vscode.window.showErrorMessage(
+        `O3DE: the Class Creation Wizard exited with code ${result.exitCode ?? "?"} — see “O3DE Build Output”.`,
+      );
+    }
+  });
+}
+
+/** The registry key for a project's Class Wizard — one wizard per project. */
+export function classWizardJobKey(projectPath: string): string {
+  return `classWizard:${projectPath}`;
 }

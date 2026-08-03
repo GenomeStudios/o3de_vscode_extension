@@ -6,7 +6,7 @@ import {
   coreCountLabel,
   parseCustomTargets,
 } from "../build/buildCommand";
-import { parseTargetNames } from "../intellisense/fileApi";
+import { parseTargetNames, parseExecutableTarget } from "../intellisense/fileApi";
 
 suite("buildCommand", () => {
   const buildDir = "D:/OffLocalDev/CurvesTest/build/windows";
@@ -124,5 +124,31 @@ suite("fileApi.parseTargetNames", () => {
 
   test("empty when there are no configurations", () => {
     assert.deepStrictEqual(parseTargetNames({ configurations: [] }, "profile"), []);
+  });
+});
+
+suite("fileApi.parseExecutableTarget", () => {
+  test("EXECUTABLE targets yield name + first artifact", () => {
+    assert.deepStrictEqual(
+      parseExecutableTarget({
+        name: "O3DEQtControlGallery",
+        type: "EXECUTABLE",
+        artifacts: [{ path: "bin/profile/O3DEQtControlGallery.exe" }],
+      }),
+      { name: "O3DEQtControlGallery", artifact: "bin/profile/O3DEQtControlGallery.exe" },
+    );
+  });
+
+  test("non-executables and nameless targets are rejected", () => {
+    assert.strictEqual(parseExecutableTarget({ name: "Gem", type: "MODULE_LIBRARY" }), undefined);
+    assert.strictEqual(parseExecutableTarget({ name: "Editor", type: "UTILITY" }), undefined);
+    assert.strictEqual(parseExecutableTarget({ type: "EXECUTABLE" }), undefined);
+  });
+
+  test("missing artifacts still yields the name", () => {
+    assert.deepStrictEqual(parseExecutableTarget({ name: "Tool", type: "EXECUTABLE" }), {
+      name: "Tool",
+      artifact: undefined,
+    });
   });
 });

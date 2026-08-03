@@ -43,6 +43,13 @@ export class RunState {
   /** Fires with the new running state whenever it flips (the Execute row listens to toggle Run/Stop). */
   readonly onDidChange = this.changed.event;
 
+  /**
+   * @param extraImages Additional exe images to probe beyond the standard
+   * Editor/GameLauncher set — the panel's CUSTOM run target (any executable
+   * target), supplied live so a selection change is picked up next poll.
+   */
+  constructor(private readonly extraImages: () => string[] = () => []) {}
+
   /** Latest known state (false until first published). */
   get isRunning(): boolean {
     return this.current === true;
@@ -67,7 +74,8 @@ export class RunState {
 
   /** Re-detect and republish if it changed. Call after Run / Stop for an instant flip. */
   async refresh(): Promise<void> {
-    const running = runManager.anyRunning() || (await anyImageRunning(runTargetImages()));
+    const images = [...new Set([...runTargetImages(), ...this.extraImages()])];
+    const running = runManager.anyRunning() || (await anyImageRunning(images));
     if (running !== this.current) {
       this.current = running;
       await vscode.commands.executeCommand("setContext", CONTEXT_KEY, running);

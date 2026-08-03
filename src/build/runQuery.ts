@@ -15,15 +15,18 @@ import { log } from "../log";
 import { BuildOptions, BuildConfig, RunTarget } from "./buildOptions";
 import { O3deProject } from "../o3de/identity";
 import { firstWorkspaceProject } from "./projectResolve";
-import { resolveRunnable } from "./run";
-import { runArgsFor, gameLauncherExeName } from "./runCommand";
+import { resolveRunnable, buildInFlightReason } from "./run";
+import { runArgsFor, gameLauncherExeName, runTargetExeName } from "./runCommand";
 import { anyImageRunning } from "./processProbe";
 import * as runManager from "./runManager";
 
-// The run-target exes for a project (Editor + its GameLauncher) — the images the
-// is-running probe checks, matching Stop's force-quit sweep.
-function projectImages(project: O3deProject): string[] {
-  return ["Editor.exe", gameLauncherExeName(project.projectName)];
+// The run-target exes for a project — Editor + its GameLauncher (Stop's sweep
+// set) plus whatever the panel's run target resolves to (any executable target),
+// so "is it running" tracks the same app Run would launch.
+function projectImages(project: O3deProject, runTarget: RunTarget): string[] {
+  return [
+    ...new Set(["Editor.exe", gameLauncherExeName(project.projectName), runTargetExeName(runTarget, project.projectName)]),
+  ];
 }
 
 // ---- Is running (no build) -------------------------------------------------
@@ -43,7 +46,7 @@ export async function runStatus(buildOptions: BuildOptions): Promise<RunStatus> 
   if (!project) {
     return { running: false, tracked: false, images: [], runTarget: buildOptions.runTarget, note: "No O3DE project in this workspace." };
   }
-  const images = projectImages(project);
+  const images = projectImages(project, buildOptions.runTarget);
   const tracked = runManager.isRunning(project.path);
   const running = tracked || (await anyImageRunning(images));
   return {
@@ -82,6 +85,11 @@ export function launchRunTarget(
 
   if (process.platform !== "win32") {
     return { launched: false, target, config, reason: "Run currently targets Windows." };
+  }
+  // Never launch into a half-written build — same rule the panel's Run obeys.
+  const building = buildInFlightReason();
+  if (building) {
+    return { launched: false, target, config, reason: building };
   }
   const project = firstWorkspaceProject();
   if (!project) {
