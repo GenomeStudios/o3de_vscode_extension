@@ -3,7 +3,7 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [pending_version] — 2026-08-18
+## [0.2.2] — 2026-08-19
 
 ### Added
 
