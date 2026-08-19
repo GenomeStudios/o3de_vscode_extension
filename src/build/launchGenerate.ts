@@ -16,7 +16,7 @@ import { resolveProjectEngine } from "../o3de/discovery";
 import { BuildOptions } from "./buildOptions";
 import { platformBuildDir } from "./configureCommand";
 import { buildLaunchConfigurations, mergeLaunchJson, LaunchInputs } from "./launchConfig";
-import { editorExeCandidates } from "./runCommand";
+import { editorExeCandidates, gameLauncherExeName } from "./runCommand";
 import { sourceEngineFolder, workspaceFolderForPath } from "./workspaceFolders";
 import { normalizePath, replaceRoot } from "../intellisense/paths";
 
@@ -55,9 +55,12 @@ export function writeLaunchConfig(project: O3deProject, options: BuildOptions): 
   const source = sourceEngineFolder();
   let natvisPath: string | undefined;
   if (source) {
-    natvisPath = source.ref + NATVIS_REL;
-    if (!fs.existsSync(source.path + NATVIS_REL)) {
-      log().warn(`azcore.natvis missing in source engine (${source.path + NATVIS_REL}); emitting anyway.`);
+    // natvis is an MSVC visualizer (cppvsdbg) — only meaningful on Windows.
+    if (process.platform === "win32") {
+      natvisPath = source.ref + NATVIS_REL;
+      if (!fs.existsSync(source.path + NATVIS_REL)) {
+        log().warn(`azcore.natvis missing in source engine (${source.path + NATVIS_REL}); emitting anyway.`);
+      }
     }
     if (!fs.existsSync(source.path + CLASSWIZARD_REL)) {
       log().warn(`ClassWizard.py missing in source engine (${source.path + CLASSWIZARD_REL}); emitting anyway.`);
@@ -67,7 +70,7 @@ export function writeLaunchConfig(project: O3deProject, options: BuildOptions): 
   const inputs: LaunchInputs = {
     projectRef,
     editorProgram: resolveEditorProgram(project, config, projectRef),
-    gameLauncherProgram: `${projectRef}/build/${platform}/bin/${config}/${project.projectName}.GameLauncher.exe`,
+    gameLauncherProgram: `${projectRef}/build/${platform}/bin/${config}/${gameLauncherExeName(project.projectName)}`,
     natvisPath,
     sourceEngineRef: source?.ref,
   };

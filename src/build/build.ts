@@ -24,11 +24,12 @@ import { buildJobKey } from "./buildRun";
 import { startBuildJob } from "./buildJobs";
 import { cancelManagedCommand, managedJob } from "./managedCommand";
 import { BuildResult } from "./buildOutput";
+import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 
 // ---- Command ---------------------------------------------------------------
 export async function buildProject(options: BuildOptions): Promise<void> {
-  if (process.platform !== "win32") {
-    void vscode.window.showInformationMessage("O3DE: Build currently targets Windows (MSVC).");
+  if (!isPlatformToolsEnabled()) {
+    void vscode.window.showInformationMessage(platformDisabledMessage());
     return;
   }
 
@@ -46,6 +47,7 @@ export async function buildProject(options: BuildOptions): Promise<void> {
     config: options.config,
     targets: options.targets,
     coreCount: options.coreCount,
+    compiler: options.compiler,
     interactive: true,
     project,
   }).done;

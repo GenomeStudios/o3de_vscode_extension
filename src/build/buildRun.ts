@@ -18,8 +18,9 @@
 
 import * as vscode from "vscode";
 import { log } from "../log";
-import { ensureVisualStudio } from "../env/visualStudioGuard";
-import { captureMsvcEnvironmentDelta } from "../env/msvcEnvironment";
+import { resolveBuildEnvironment } from "./toolchain";
+import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
+import { Compiler, defaultCompiler } from "./buildOptions";
 import { readProject, O3deProject } from "../o3de/identity";
 import { projectBuildDir, formatCommand } from "./configureCommand";
 import { buildBuildArgs } from "./buildCommand";
@@ -49,6 +50,8 @@ export interface HeadlessBuildParams {
   config: string; // profile | debug | release
   targets: string[]; // empty = build everything
   coreCount?: number; // parallel jobs; 0/undefined = auto
+  /** Compiler used to resolve/verify the toolchain env (Linux: clang vs gcc). Defaults to the OS default. */
+  compiler?: Compiler;
   /**
    * Prompt on recoverable preconditions (process-guard) instead of reporting
    * them as blocked. The tab sets this; MCP leaves it off.
@@ -86,8 +89,8 @@ export async function runBuildHeadless(params: HeadlessBuildParams): Promise<Bui
     blocked: reason,
   });
 
-  if (process.platform !== "win32") {
-    return blocked("not-windows", "Build currently targets Windows (MSVC).");
+  if (!isPlatformToolsEnabled()) {
+    return blocked("not-windows", platformDisabledMessage());
   }
 
   const bad = targets.filter((t) => !SAFE_TARGET.test(t));
@@ -112,9 +115,11 @@ export async function runBuildHeadless(params: HeadlessBuildParams): Promise<Bui
     return blocked("busy", "A configure is running — wait for it to finish, then build.");
   }
 
-  const vs = await ensureVisualStudio({ interactive: false });
-  if (!vs?.vcvars64Path) {
-    return blocked("no-msvc", "No usable Visual Studio (MSVC) — vcvars64.bat not found.");
+  // The compiler environment for this OS (Windows: MSVC vcvars; Linux: verify
+  // gcc/clang, empty delta). Resolved once and reused for the managed command.
+  const toolchain = await resolveBuildEnvironment(params.compiler ?? defaultCompiler());
+  if (!toolchain.ok) {
+    return blocked("no-toolchain", toolchain.reason ?? "Could not establish the compiler environment.");
   }
 
   if (!isConfiguredFor(project, params.generator)) {
@@ -146,13 +151,7 @@ export async function runBuildHeadless(params: HeadlessBuildParams): Promise<Bui
   const argv = buildBuildArgs({ buildDir, config: params.config, targets, coreCount: params.coreCount });
   const command = formatCommand(argv);
 
-  let env: Record<string, string>;
-  try {
-    env = await captureMsvcEnvironmentDelta(vs.vcvars64Path);
-  } catch (err) {
-    const message = (err as { message?: string }).message ?? String(err);
-    return blocked("env-failed", `Failed to establish the MSVC environment: ${message}`, command);
-  }
+  const env = toolchain.env;
 
   const label = `Build ${project.projectName}`;
   log().info(`${label} — targets=[${targets.join(", ") || "all"}], config=${params.config}`);

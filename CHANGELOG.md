@@ -3,6 +3,23 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — 2026-08-18
+
+### Added
+
+- **Experimental Linux support — the full build/run/debug loop.** With the
+  `o3de.experimental.linuxSupport` setting on (per-project, off by default; the flag
+  shipped dormant in 0.2.1), Configure, Build, Run, Stop, Run in Debug, C++ and Lua
+  IntelliSense, and launch.json generation now work on Linux. **Windows is unchanged.**
+  On Linux the toolchain runs Ninja Multi-Config with gcc/clang — no MSVC/vcvars, the
+  compiler is inherited from your shell; the Editor and launchers resolve without the
+  `.exe` suffix from `bin/Linux`; Stop and is-running use `pgrep`/`pkill`; C++ IntelliSense
+  reports the `linux-gcc-x64` / `linux-clang-x64` mode; and Run in Debug launches under gdb
+  (`cppdbg`). A **GCC** compiler option joins Clang in the picker, which also hides the
+  Windows-only choices (MSVC, the Visual Studio generator) on Linux. Intended for testers —
+  see `docs/TESTING-LINUX.md`. Known gaps this round: gdb AZ-type pretty-printers, and the
+  build's process-guard is a deliberate no-op on Linux.
+
 ## [0.2.1] — 2026-08-03
 
 ### Changed

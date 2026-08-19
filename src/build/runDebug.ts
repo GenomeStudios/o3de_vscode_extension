@@ -15,8 +15,9 @@ import { BuildOptions } from "./buildOptions";
 import { resolveWorkspaceProject } from "./projectResolve";
 import { runArgsFor } from "./runCommand";
 import { buildInFlightReason, resolveRunnable } from "./run";
+import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 
-// cppvsdbg's `environment` adds/overrides — clear the VS Code-injected vars so a
+// The debugger `environment` adds/overrides — clear the VS Code-injected vars so a
 // debugged Editor's own child launches (e.g. the Lua-editor handoff) aren't poisoned.
 function scrubbedEnvironment(): { name: string; value: string }[] {
   return ["VSCODE_IPC_HOOK_CLI", "VSCODE_PID", "VSCODE_CWD", "VSCODE_NLS_CONFIG", "ELECTRON_RUN_AS_NODE"].map(
@@ -24,9 +25,25 @@ function scrubbedEnvironment(): { name: string; value: string }[] {
   );
 }
 
+// The native C++ debug configuration for this OS: cppvsdbg on Windows, cppdbg
+// (gdb) on Linux. Both take the same program/args/cwd; the launcher fields differ.
+function nativeDebugConfig(name: string, program: string, args: string[], cwd: string): vscode.DebugConfiguration {
+  const common = { request: "launch", name, program, args, cwd, environment: scrubbedEnvironment() };
+  if (process.platform === "win32") {
+    return { type: "cppvsdbg", ...common, console: "integratedTerminal" };
+  }
+  return {
+    type: "cppdbg",
+    ...common,
+    MIMode: "gdb",
+    externalConsole: false,
+    setupCommands: [{ description: "Enable pretty-printing for gdb", text: "-enable-pretty-printing", ignoreFailures: true }],
+  };
+}
+
 export async function runInDebug(options: BuildOptions): Promise<void> {
-  if (process.platform !== "win32") {
-    void vscode.window.showInformationMessage("O3DE: Run in Debug currently targets Windows (cppvsdbg).");
+  if (!isPlatformToolsEnabled()) {
+    void vscode.window.showInformationMessage(platformDisabledMessage());
     return;
   }
   const blocked = buildInFlightReason();
@@ -68,16 +85,10 @@ export async function runInDebug(options: BuildOptions): Promise<void> {
   const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.path));
   log().info(`Run in Debug (${target}): ${exe} ${args.join(" ")}`);
 
-  const started = await vscode.debug.startDebugging(folder, {
-    type: "cppvsdbg",
-    request: "launch",
-    name: `O3DE: Debug ${target}`,
-    program: exe,
-    args,
-    cwd: project.path,
-    console: "integratedTerminal",
-    environment: scrubbedEnvironment(),
-  });
+  const started = await vscode.debug.startDebugging(
+    folder,
+    nativeDebugConfig(`O3DE: Debug ${target}`, exe, args, project.path),
+  );
   if (!started) {
     void vscode.window.showErrorMessage("O3DE: failed to start the C++ debug session (see the O3DE log).");
   }

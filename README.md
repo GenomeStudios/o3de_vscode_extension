@@ -2,7 +2,10 @@
 
 A developer companion for [Open 3D Engine (O3DE)](https://o3de.org) in Visual Studio Code.
 
-> 🧪 **Early / experimental.** Scope and features are actively evolving. Windows-focused (MSVC).
+> 🧪 **Early / experimental.** Scope and features are actively evolving. Fully supported on
+> **Windows** (MSVC). **Linux** support is **experimental**, behind the
+> `o3de.experimental.linuxSupport` setting (gcc/clang + Ninja, no MSVC) — see
+> [Requirements](#requirements). macOS is not supported yet.
 
 Everything is driven from a single **O3DE Development Tools** panel in the activity bar: a Dashboard
 with live status, Build/Run, utilities, and collapsible Configuration & Onboarding sections, plus a
@@ -16,8 +19,9 @@ with live status, Build/Run, utilities, and collapsible Configuration & Onboardi
 - **Guided workspace setup** — assemble the multi-root workspace (project + engine source + gems)
   into a `.code-workspace`, with `.vscode` settings generated for you. **Add Gems / Folders** adds
   more roots to the live workspace on demand.
-- **Windows MSVC environment** — auto-detects Visual Studio, opens a developer terminal with the
-  MSVC environment established; detects Ninja and offers to install it.
+- **Build toolchain** — on **Windows**, auto-detects Visual Studio and opens a developer terminal
+  with the MSVC environment established, and detects Ninja (offering to install it). On **Linux**
+  (🧪 experimental), builds use gcc/clang + Ninja inherited from your shell — no MSVC needed.
 - **One-click CMake configure & build** — selectable generator, config, and target(s), mirroring
   O3DE's build flow, with a process-guard for locked build outputs.
 - **Run & force-quit** — launch the Editor or the project's GameLauncher (with custom launch
@@ -77,13 +81,22 @@ it walks through authoring, attaching a script to an entity, running it, and hit
 
 - **Reflection browser** — deeper inspection of reflected components and the BehaviorContext.
 - **Registerable templates** (Lua, components, EBuses, gems).
-- Broader cross-platform support.
+- **macOS support** (Linux is available now, experimentally — see [Requirements](#requirements)).
 
 ## Requirements
 
-Windows with **Visual Studio 2022** (Desktop development with C++), **CMake**, and optionally
-**Ninja**, plus a registered O3DE project and engine. The extension's Onboarding panel checks these
-for you and helps fill the gaps.
+A registered O3DE project and engine, plus a platform toolchain. The extension's Onboarding panel
+checks these for you and helps fill the gaps.
+
+- **Windows** (fully supported) — **Visual Studio 2022** (Desktop development with C++), **CMake**,
+  and optionally **Ninja**.
+- **Linux** (🧪 experimental) — a C++ toolchain (**Clang** recommended, or **GCC**), **CMake**, and
+  **Ninja**. Turn on the **`o3de.experimental.linuxSupport`** setting to activate the
+  build / run / debug paths (off by default; Windows is unaffected). See the tester guide,
+  [`docs/TESTING-LINUX.md`](docs/TESTING-LINUX.md). Some niceties (gdb AZ-type visualizers) aren't
+  wired yet.
+
+macOS is not supported yet.
 
 ## Development
 

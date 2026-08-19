@@ -16,8 +16,9 @@ import { BuildOptions, BuildConfig, RunTarget } from "./buildOptions";
 import { O3deProject } from "../o3de/identity";
 import { firstWorkspaceProject } from "./projectResolve";
 import { resolveRunnable, buildInFlightReason } from "./run";
-import { runArgsFor, gameLauncherExeName, runTargetExeName } from "./runCommand";
+import { runArgsFor, gameLauncherExeName, runTargetExeName, runtimeSweepImages } from "./runCommand";
 import { anyImageRunning } from "./processProbe";
+import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 import * as runManager from "./runManager";
 
 // The run-target exes for a project — Editor + its GameLauncher (Stop's sweep
@@ -25,7 +26,11 @@ import * as runManager from "./runManager";
 // so "is it running" tracks the same app Run would launch.
 function projectImages(project: O3deProject, runTarget: RunTarget): string[] {
   return [
-    ...new Set(["Editor.exe", gameLauncherExeName(project.projectName), runTargetExeName(runTarget, project.projectName)]),
+    ...new Set([
+      runTargetExeName("Editor", project.projectName),
+      gameLauncherExeName(project.projectName),
+      runTargetExeName(runTarget, project.projectName),
+    ]),
   ];
 }
 
@@ -83,8 +88,8 @@ export function launchRunTarget(
   const target = override?.target ?? buildOptions.runTarget;
   const config = override?.config ?? buildOptions.config;
 
-  if (process.platform !== "win32") {
-    return { launched: false, target, config, reason: "Run currently targets Windows." };
+  if (!isPlatformToolsEnabled()) {
+    return { launched: false, target, config, reason: platformDisabledMessage() };
   }
   // Never launch into a half-written build — same rule the panel's Run obeys.
   const building = buildInFlightReason();
@@ -144,12 +149,7 @@ export async function forceCloseRuntime(): Promise<CloseResult> {
     return { closedTracked: false, sweptImages: [], note: "No O3DE project in this workspace." };
   }
   const closedTracked = await runManager.stop(project.path);
-  const images = [
-    "Editor.exe",
-    gameLauncherExeName(project.projectName),
-    "AssetProcessor.exe",
-    "ScriptCanvasApplication.exe",
-  ];
+  const images = runtimeSweepImages(project.projectName);
   for (const image of images) {
     await runManager.killByName(image);
   }

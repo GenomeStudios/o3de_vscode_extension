@@ -22,6 +22,24 @@ export function cppStandardFromApi(standard: string | undefined): string {
   return standard ? `c++${standard}` : "c++20";
 }
 
+/**
+ * The cpptools intelliSenseMode for the current OS and compiler. Windows is MSVC;
+ * on Linux the compiler is inferred from the compilerPath basename (clang vs gcc)
+ * so cpptools parses with the matching dialect instead of misreading MSVC syntax.
+ */
+export function intelliSenseModeFor(
+  compilerPath: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
+    return "windows-msvc-x64";
+  }
+  if (platform === "darwin") {
+    return "macos-clang-x64";
+  }
+  return (compilerPath ?? "").toLowerCase().includes("clang") ? "linux-clang-x64" : "linux-gcc-x64";
+}
+
 /** Build one c_cpp_properties configuration (Win32 / MSVC). */
 export function buildCppConfiguration(input: CppConfigInput): Record<string, unknown> {
   return {
@@ -34,7 +52,7 @@ export function buildCppConfiguration(input: CppConfigInput): Record<string, unk
     ...(input.compilerPath ? { compilerPath: input.compilerPath } : {}),
     cStandard: "c17",
     cppStandard: cppStandardFromApi(input.standard),
-    intelliSenseMode: "windows-msvc-x64",
+    intelliSenseMode: intelliSenseModeFor(input.compilerPath),
     browse: {
       path: input.includePath,
       limitSymbolsToIncludedHeaders: true,

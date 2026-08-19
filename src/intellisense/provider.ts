@@ -27,6 +27,7 @@ import { sourceEngineFolder } from "../build/workspaceFolders";
 import { EXTENSION_ID } from "../constants";
 import { loadFileApiReply } from "./fileApi";
 import { buildProviderModel, ProviderModel } from "./providerModel";
+import { intelliSenseModeFor } from "./cppProperties";
 import { detectBuildEngineRoot } from "./engineRoot";
 import { RootMapping } from "./remap";
 import { normalizePath, uniqueStable } from "./paths";
@@ -59,7 +60,7 @@ function buildAbsoluteMappings(
 const EMPTY_CONFIG: SourceFileConfiguration = {
   includePath: [],
   defines: [],
-  intelliSenseMode: "windows-msvc-x64",
+  intelliSenseMode: intelliSenseModeFor(undefined) as SourceFileConfiguration["intelliSenseMode"],
 };
 
 // ---- Provider --------------------------------------------------------------

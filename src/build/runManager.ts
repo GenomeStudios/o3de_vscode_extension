@@ -57,11 +57,21 @@ export async function killTree(pid: number): Promise<void> {
 
 /** Force-kill every process with the given image name — the orphan sweep. */
 export async function killByName(image: string): Promise<void> {
-  const exe = image.endsWith(".exe") ? image : `${image}.exe`;
-  const cmd = process.platform === "win32" ? `taskkill /IM ${exe} /F` : `pkill -f ${image}`;
+  if (process.platform === "win32") {
+    const exe = image.endsWith(".exe") ? image : `${image}.exe`;
+    try {
+      await execAsync(`taskkill /IM ${exe} /F`);
+      log().info(`Force-quit ${exe}.`);
+    } catch {
+      /* not running → nothing to do */
+    }
+    return;
+  }
+  // Unix: match the full command line by the bare binary name (no .exe).
+  const name = image.endsWith(".exe") ? image.slice(0, -4) : image;
   try {
-    await execAsync(cmd);
-    log().info(`Force-quit ${exe}.`);
+    await execAsync(`pkill -f -- ${JSON.stringify(name)}`);
+    log().info(`Force-quit ${name}.`);
   } catch {
     /* not running → nothing to do */
   }

@@ -16,7 +16,7 @@ import type { SourceFileConfiguration } from "vscode-cpptools";
 import { FileApiReply } from "./fileApi";
 import { consolidateTargets } from "./consolidate";
 import { remapIncludes, remapPath, RootMapping } from "./remap";
-import { cppStandardFromApi } from "./cppProperties";
+import { cppStandardFromApi, intelliSenseModeFor } from "./cppProperties";
 import { normalizePath, uniqueStable } from "./paths";
 
 export interface ProviderModel {
@@ -38,7 +38,7 @@ function toConfig(
   return {
     includePath,
     defines,
-    intelliSenseMode: "windows-msvc-x64",
+    intelliSenseMode: intelliSenseModeFor(compilerPath) as SourceFileConfiguration["intelliSenseMode"],
     standard: cppStandardFromApi(standard) as SourceFileConfiguration["standard"],
     ...(forcedInclude.length ? { forcedInclude } : {}),
     ...(compilerPath ? { compilerPath } : {}),

@@ -24,50 +24,65 @@ export const O3DE_LAUNCH_PREFIX = "O3DE: ";
 export function buildLaunchConfigurations(inputs: LaunchInputs): Record<string, unknown>[] {
   const configs: Record<string, unknown>[] = [];
 
+  // Native C++ debugger for this OS: cppvsdbg on Windows, cppdbg (gdb) on Linux.
+  const isWin = process.platform === "win32";
+  const nativeType = isWin ? "cppvsdbg" : "cppdbg";
+  const launchExtras: Record<string, unknown> = isWin
+    ? { console: "integratedTerminal" }
+    : {
+        MIMode: "gdb",
+        externalConsole: false,
+        setupCommands: [{ description: "Enable pretty-printing for gdb", text: "-enable-pretty-printing", ignoreFailures: true }],
+      };
+
   // Editor (native debug) — launches the resolved Editor against this project.
   configs.push({
     name: "O3DE: Editor",
-    type: "cppvsdbg",
+    type: nativeType,
     request: "launch",
     program: inputs.editorProgram,
     args: ["--project-path", inputs.projectRef],
     cwd: inputs.projectRef,
     stopAtEntry: false,
     environment: [],
-    console: "integratedTerminal",
-    ...(inputs.natvisPath ? { visualizerFile: inputs.natvisPath } : {}),
+    ...launchExtras,
+    // natvis is an MSVC/cppvsdbg visualizer — Windows only.
+    ...(isWin && inputs.natvisPath ? { visualizerFile: inputs.natvisPath } : {}),
   });
 
   // GameLauncher (native debug) — the project's built game runtime.
   configs.push({
     name: "O3DE: GameLauncher",
-    type: "cppvsdbg",
+    type: nativeType,
     request: "launch",
     program: inputs.gameLauncherProgram,
     args: [],
     cwd: inputs.projectRef,
     stopAtEntry: false,
     environment: [],
-    console: "integratedTerminal",
+    ...launchExtras,
   });
 
-  // Attach to a running O3DE process (Editor, launcher, tool).
-  configs.push({
-    name: "O3DE: Attach",
-    type: "cppvsdbg",
-    request: "attach",
-    processId: "${command:pickProcess}",
-  });
-
-  // Attach WITH AZ type visualization — only if we have a source-engine natvis.
-  if (inputs.natvisPath) {
+  // Attach configs are Windows-only for now: cppvsdbg attaches by pid alone, but
+  // cppdbg (gdb) attach also requires the target program path, which a generic
+  // "pick any process" attach doesn't have. Linux users debug via the launch
+  // configs above (or "O3DE: Run in Debug").
+  if (isWin) {
     configs.push({
-      name: "O3DE: Attach (visualized)",
+      name: "O3DE: Attach",
       type: "cppvsdbg",
       request: "attach",
       processId: "${command:pickProcess}",
-      visualizerFile: inputs.natvisPath,
     });
+    if (inputs.natvisPath) {
+      configs.push({
+        name: "O3DE: Attach (visualized)",
+        type: "cppvsdbg",
+        request: "attach",
+        processId: "${command:pickProcess}",
+        visualizerFile: inputs.natvisPath,
+      });
+    }
   }
 
   // Class Creation Wizard (Python) — runs from the source engine's Tools/.

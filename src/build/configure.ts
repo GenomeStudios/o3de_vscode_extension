@@ -22,9 +22,9 @@ import * as path from "path";
 import { log } from "../log";
 import { commandOutput } from "./commandOutput";
 import { runManagedCommand, describeResult, cancelManagedCommand, managedJob } from "./managedCommand";
-import { ensureVisualStudio } from "../env/visualStudioGuard";
 import { ensureNinja } from "./ninjaGuard";
-import { captureMsvcEnvironmentDelta } from "../env/msvcEnvironment";
+import { resolveBuildEnvironment } from "./toolchain";
+import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 import { readManifest } from "../o3de/manifest";
 import { O3deProject } from "../o3de/identity";
 import { BuildOptions } from "./buildOptions";
@@ -108,8 +108,8 @@ export async function stopConfigure(): Promise<boolean> {
 // ---- Command ---------------------------------------------------------------
 /** Run the CMake configure. Returns true when it completed successfully. */
 export async function configureProject(options: BuildOptions): Promise<boolean> {
-  if (process.platform !== "win32") {
-    void vscode.window.showInformationMessage("O3DE: Configure currently targets Windows (MSVC).");
+  if (!isPlatformToolsEnabled()) {
+    void vscode.window.showInformationMessage(platformDisabledMessage());
     return false;
   }
 
@@ -124,10 +124,12 @@ export async function configureProject(options: BuildOptions): Promise<boolean> 
     return false;
   }
 
-  // Toolchain prerequisites: Visual Studio always; Ninja only for the Ninja generator.
-  const vs = await ensureVisualStudio({ interactive: false });
-  if (!vs?.vcvars64Path) {
-    log().error("Configure aborted — no usable Visual Studio (vcvars64.bat).");
+  // Toolchain prerequisites: the compiler environment (Windows MSVC / Linux
+  // gcc-clang) always; Ninja only for the Ninja generator.
+  const toolchain = await resolveBuildEnvironment(options.compiler);
+  if (!toolchain.ok) {
+    log().error(`Configure aborted — ${toolchain.reason}`);
+    void vscode.window.showErrorMessage(`O3DE: ${toolchain.reason}`);
     return false;
   }
   if (options.generator === "Ninja Multi-Config" && !(await ensureNinja({ interactive: true }))) {
@@ -184,19 +186,9 @@ export async function configureProject(options: BuildOptions): Promise<boolean> 
   });
   const command = formatCommand(argv);
 
-  // MSVC environment (equivalent to `call vcvars64.bat`) — the thing CMake Tools
-  // cannot establish for an O3DE project, and the reason we run cmake ourselves.
-  let env: Record<string, string>;
-  try {
-    env = await captureMsvcEnvironmentDelta(vs.vcvars64Path);
-  } catch (err) {
-    const e = err as { message?: string };
-    log().error(`Failed to establish MSVC environment: ${e.message ?? String(err)}`);
-    void vscode.window.showErrorMessage(
-      "O3DE: failed to establish the Visual Studio environment (see the O3DE log).",
-    );
-    return false;
-  }
+  // The compiler environment resolved above (Windows MSVC delta; empty on Linux,
+  // where cmake inherits gcc/clang from the shell).
+  const env = toolchain.env;
 
   const label = `Configure ${project.projectName}`;
   log().info(`Configuring ${project.projectName} → ${buildDir}`);

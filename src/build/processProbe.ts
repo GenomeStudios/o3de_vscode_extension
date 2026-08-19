@@ -12,22 +12,33 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
-/** True if a process with this image name is live (tasklist prints its row; else an INFO line). */
+/** True if a process with this image name is live. Windows: tasklist row; Linux: pgrep match. */
 export async function isImageRunning(image: string): Promise<boolean> {
-  if (process.platform !== "win32") {
-    return false;
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execAsync(`tasklist /FI "IMAGENAME eq ${image}" /NH`);
+      return stdout.toLowerCase().includes(image.toLowerCase());
+    } catch {
+      return false;
+    }
   }
-  try {
-    const { stdout } = await execAsync(`tasklist /FI "IMAGENAME eq ${image}" /NH`);
-    return stdout.toLowerCase().includes(image.toLowerCase());
-  } catch {
-    return false;
+  if (process.platform === "linux") {
+    // Linux binaries carry no .exe; match the full command line (pgrep -f) the
+    // same way the force-quit sweep (pkill -f) does. Exit 0 = at least one match.
+    const name = image.toLowerCase().endsWith(".exe") ? image.slice(0, -4) : image;
+    try {
+      await execAsync(`pgrep -f -- ${JSON.stringify(name)}`);
+      return true;
+    } catch {
+      return false; // exit 1 = no match
+    }
   }
+  return false; // macOS / other — unsupported
 }
 
 /** True if ANY of the given image names is live. */
 export async function anyImageRunning(images: string[]): Promise<boolean> {
-  if (process.platform !== "win32" || images.length === 0) {
+  if (images.length === 0) {
     return false;
   }
   const results = await Promise.all(images.map(isImageRunning));

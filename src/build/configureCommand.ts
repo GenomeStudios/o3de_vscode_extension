@@ -18,6 +18,23 @@ export function platformBuildDir(): string {
   return process.platform === "darwin" ? "mac" : "linux";
 }
 
+/** Executable file suffix for the current OS (".exe" on Windows, "" elsewhere). */
+export function exeSuffix(): string {
+  return process.platform === "win32" ? ".exe" : "";
+}
+
+/**
+ * Engine prebuilt bin subdirectory on disk — capitalized (Windows/Linux/Mac),
+ * distinct from platformBuildDir()'s lowercase project build folder. O3DE ships
+ * an SDK engine's binaries under <engine>/bin/<EngineBinDir>/<config>.
+ */
+export function engineBinDirName(): string {
+  if (process.platform === "win32") {
+    return "Windows";
+  }
+  return process.platform === "darwin" ? "Mac" : "Linux";
+}
+
 /** Absolute build tree for a project: <project>/build/<platform>. */
 export function projectBuildDir(projectPath: string): string {
   return path.join(projectPath, "build", platformBuildDir());
@@ -61,16 +78,17 @@ export interface ConfigureInputs {
   buildDir: string;
   generator: string; // "Ninja Multi-Config" | "Visual Studio 17 2022"
   thirdPartyPath: string; // LY_3RDPARTY_PATH
-  compiler?: "MSVC" | "Clang"; // default MSVC
+  compiler?: "MSVC" | "Clang" | "GCC"; // default MSVC (Windows) / Clang (Linux)
   extraCacheArgs?: Record<string, string>; // Advanced-tab -D<VAR>=<value> cache flags
 }
 
 /**
  * The argv for the O3DE configure: cmake -G <gen> -S <project> -B <build>
- * -DLY_3RDPARTY_PATH=<3rd>, plus the compiler selection. Clang maps to O3DE's
- * two supported paths (matching its CMakePresets):
- *   - VS generator  → -T ClangCl  (the clang-cl toolset that ships with VS)
- *   - Ninja         → -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+ * -DLY_3RDPARTY_PATH=<3rd>, plus the compiler selection.
+ *   - Clang, VS generator  → -T ClangCl  (the clang-cl toolset that ships with VS)
+ *   - Clang, Ninja         → -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++
+ *   - GCC   (Linux/Ninja)  → -DCMAKE_C_COMPILER=gcc    -DCMAKE_CXX_COMPILER=g++
+ *   - MSVC                 → no override (the default toolset for the VS/Ninja env)
  */
 export function buildConfigureArgs(inputs: ConfigureInputs): string[] {
   const args = [
@@ -90,6 +108,8 @@ export function buildConfigureArgs(inputs: ConfigureInputs): string[] {
     } else {
       args.push("-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++");
     }
+  } else if (inputs.compiler === "GCC") {
+    args.push("-DCMAKE_C_COMPILER=gcc", "-DCMAKE_CXX_COMPILER=g++");
   }
 
   // Advanced-tab extra cache variables (e.g. LY_RENDERDOC_ENABLED, CMAKE_OBJECT_PATH_MAX).

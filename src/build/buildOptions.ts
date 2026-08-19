@@ -17,13 +17,29 @@ export type BuildConfig = "profile" | "debug" | "release";
  * build output (e.g. "O3DEQtControlGallery") — see runTargetExeName.
  */
 export type RunTarget = string;
-export type Compiler = "MSVC" | "Clang";
+export type Compiler = "MSVC" | "Clang" | "GCC";
 
 export const GENERATORS: Generator[] = ["Ninja Multi-Config", "Visual Studio 17 2022"];
 export const BUILD_CONFIGS: BuildConfig[] = ["profile", "debug", "release"];
 /** The always-offered run targets — the picker adds every discovered executable after these. */
 export const RUN_TARGETS: RunTarget[] = ["Editor", "GameLauncher"];
-export const COMPILERS: Compiler[] = ["MSVC", "Clang"];
+export const COMPILERS: Compiler[] = ["MSVC", "Clang", "GCC"];
+
+// ---- Platform-appropriate choices ------------------------------------------
+/** The default compiler for the current OS (MSVC on Windows, Clang elsewhere). */
+export function defaultCompiler(): Compiler {
+  return process.platform === "win32" ? "MSVC" : "Clang";
+}
+
+/** Compilers offered in the picker for the current OS (MSVC is Windows-only; GCC/Clang are Linux). */
+export function compilersForPlatform(): Compiler[] {
+  return process.platform === "win32" ? ["MSVC", "Clang"] : ["Clang", "GCC"];
+}
+
+/** Generators offered in the picker for the current OS (the VS generator is Windows-only). */
+export function generatorsForPlatform(): Generator[] {
+  return process.platform === "win32" ? GENERATORS : ["Ninja Multi-Config"];
+}
 
 const KEY_GENERATOR = "o3de.build.generator";
 const KEY_COMPILER = "o3de.build.compiler";
@@ -44,9 +60,10 @@ export class BuildOptions {
     return this.state.get<Generator>(KEY_GENERATOR) ?? "Ninja Multi-Config";
   }
 
-  /** C++ compiler: MSVC (platform default) or Clang (clang-cl under VS, clang under Ninja). */
+  /** C++ compiler. Windows: MSVC (default) or Clang (clang-cl under VS, clang under Ninja).
+   *  Linux: Clang (default) or GCC. The stored value falls back to the OS default. */
   get compiler(): Compiler {
-    return this.state.get<Compiler>(KEY_COMPILER) ?? "MSVC";
+    return this.state.get<Compiler>(KEY_COMPILER) ?? defaultCompiler();
   }
 
   get config(): BuildConfig {

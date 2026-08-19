@@ -8,7 +8,7 @@
 // ============================================================================
 
 import * as path from "path";
-import { platformBuildDir } from "./configureCommand";
+import { platformBuildDir, exeSuffix, engineBinDirName } from "./configureCommand";
 import type { RunTarget } from "./buildOptions";
 import type { O3deEngine } from "../o3de/identity";
 
@@ -18,9 +18,20 @@ export function projectRuntimeExe(projectPath: string, config: string, exeName: 
   return path.join(projectPath, "build", platformBuildDir(), "bin", config, exeName);
 }
 
-/** O3DE launcher naming: <Project>.GameLauncher.exe (matches the user's build output). */
+/** O3DE launcher naming: <Project>.GameLauncher(.exe) (matches the build output; no suffix on Linux). */
 export function gameLauncherExeName(projectName: string): string {
-  return `${projectName}.GameLauncher.exe`;
+  return `${projectName}.GameLauncher${exeSuffix()}`;
+}
+
+/** The O3DE runtime process images to force-quit in an orphan sweep (platform-aware). */
+export function runtimeSweepImages(projectName: string): string[] {
+  const suffix = exeSuffix();
+  return [
+    `Editor${suffix}`,
+    gameLauncherExeName(projectName),
+    `AssetProcessor${suffix}`,
+    `ScriptCanvasApplication${suffix}`,
+  ];
 }
 
 /**
@@ -31,7 +42,7 @@ export function gameLauncherExeName(projectName: string): string {
  */
 export function runTargetExeName(target: RunTarget, projectName: string): string {
   if (target === "Editor") {
-    return "Editor.exe";
+    return `Editor${exeSuffix()}`;
   }
   if (target === "GameLauncher") {
     return gameLauncherExeName(projectName);
@@ -48,7 +59,11 @@ export function customRunImage(target: RunTarget): string | undefined {
   if (target === "Editor" || target === "GameLauncher") {
     return undefined;
   }
-  return target.toLowerCase().endsWith(".exe") ? target : `${target}.exe`;
+  const suffix = exeSuffix();
+  if (suffix === "") {
+    return target; // no exe suffix on this OS — the target name IS the image
+  }
+  return target.toLowerCase().endsWith(suffix) ? target : `${target}${suffix}`;
 }
 
 /**
@@ -59,19 +74,20 @@ export function customRunImage(target: RunTarget): string | undefined {
  *     stale stub and must NOT be run (running it exits code 1).
  *   - source / custom / unresolved engine → the project's own built Editor.
  * Pure: the caller resolves the engine, then picks the first candidate that exists.
- * NOTE: engine bin is capital-"Windows" on disk; the project build dir is lowercase
- * (platformBuildDir) — do not "unify" the casing.
+ * NOTE: engine bin is capitalized on disk (Windows/Linux via engineBinDirName);
+ * the project build dir is lowercase (platformBuildDir) — do not "unify" the casing.
  */
 export function editorExeCandidates(
   engine: O3deEngine | undefined,
   projectPath: string,
   config: string,
 ): string[] {
+  const editor = `Editor${exeSuffix()}`;
   if (engine?.isSdkEngine) {
-    const engineBin = path.join(engine.path, "bin", "Windows", config);
-    return [path.join(engineBin, "Default", "Editor.exe"), path.join(engineBin, "Editor.exe")];
+    const engineBin = path.join(engine.path, "bin", engineBinDirName(), config);
+    return [path.join(engineBin, "Default", editor), path.join(engineBin, editor)];
   }
-  return [projectRuntimeExe(projectPath, config, "Editor.exe")];
+  return [projectRuntimeExe(projectPath, config, editor)];
 }
 
 // ---- Launch args -----------------------------------------------------------

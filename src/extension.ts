@@ -52,12 +52,12 @@ import { DependencyStatus } from "./deps/dependencyStatus";
 import { O3deMcpServer } from "./mcp/server";
 import {
   BuildOptions,
-  GENERATORS,
   BUILD_CONFIGS,
-  COMPILERS,
   Generator,
   BuildConfig,
   Compiler,
+  generatorsForPlatform,
+  compilersForPlatform,
 } from "./build/buildOptions";
 
 // ---- Activation ------------------------------------------------------------
@@ -418,7 +418,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Commands: choose the CMake generator / build config (shown in the tab, persisted).
   const selectGenerator = vscode.commands.registerCommand("o3de.selectGenerator", async () => {
-    const pick = await vscode.window.showQuickPick(GENERATORS, {
+    const pick = await vscode.window.showQuickPick(generatorsForPlatform(), {
       title: "O3DE: CMake Generator",
       placeHolder: `Current: ${buildOptions.generator}`,
     });
@@ -436,7 +436,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
   const selectCompiler = vscode.commands.registerCommand("o3de.selectCompiler", async () => {
-    const pick = await vscode.window.showQuickPick(COMPILERS, {
+    const pick = await vscode.window.showQuickPick(compilersForPlatform(), {
       title: "O3DE: Compiler",
       placeHolder: `Current: ${buildOptions.compiler} — switching may need a fresh Configure`,
     });

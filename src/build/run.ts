@@ -17,8 +17,9 @@ import { BuildOptions, RunTarget } from "./buildOptions";
 import { O3deProject } from "../o3de/identity";
 import { resolveProjectEngine } from "../o3de/discovery";
 import { resolveWorkspaceProject } from "./projectResolve";
-import { runArgsFor, projectRuntimeExe, runTargetExeName, gameLauncherExeName, editorExeCandidates } from "./runCommand";
+import { runArgsFor, projectRuntimeExe, runTargetExeName, runtimeSweepImages, editorExeCandidates } from "./runCommand";
 import { runningJobOfKind } from "./managedCommand";
+import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 import * as runManager from "./runManager";
 
 // ---- Build-in-flight guard -------------------------------------------------
@@ -78,8 +79,8 @@ function logRunResolution(project: O3deProject, target: RunTarget, config: strin
 
 // ---- Command: Run ----------------------------------------------------------
 export async function runProject(options: BuildOptions): Promise<void> {
-  if (process.platform !== "win32") {
-    void vscode.window.showInformationMessage("O3DE: Run currently targets Windows.");
+  if (!isPlatformToolsEnabled()) {
+    void vscode.window.showInformationMessage(platformDisabledMessage());
     return;
   }
 
@@ -161,13 +162,7 @@ export async function stopRun(): Promise<void> {
   if (choice !== "Force-Quit All") {
     return;
   }
-  const images = [
-    "Editor.exe",
-    gameLauncherExeName(project.projectName),
-    "AssetProcessor.exe",
-    "ScriptCanvasApplication.exe",
-  ];
-  for (const image of images) {
+  for (const image of runtimeSweepImages(project.projectName)) {
     await runManager.killByName(image);
   }
   void vscode.window.showInformationMessage("O3DE: swept O3DE runtime processes.");
