@@ -1,9 +1,10 @@
 # Linux Test Protocol — O3DE Development Tools
 
-Thanks for helping validate Linux support. The extension is developed on Windows,
-so **you are the only one who can confirm the Linux behaviour actually works.**
-This checklist walks the whole loop; each step says what you should see and what to
-send back if it differs.
+Linux is a supported platform and its paths are **on by default** — nothing to enable.
+The extension is still developed on Windows, though, so **Linux users are the only ones
+who can confirm the behaviour on real hardware.** This checklist walks the whole loop;
+each step says what you should see and what to send back if it differs. Use it to
+validate a new release, or to narrow down a Linux issue before filing it.
 
 Please work top to bottom. If a step fails, **don't stop** — note it, run
 **O3DE: Copy Environment Report** (step 0), and continue where you can. Partial
@@ -19,19 +20,19 @@ results are still useful.
   (this protocol tests the VS Code layer, not your engine install).
 - VS Code, plus the C/C++ extension (`ms-vscode.cpptools`) and, for Lua steps, the
   Lua language server (`sumneko.lua`).
-- The test `.vsix` we sent you.
+- The extension — from the Marketplace / Open VSX, or a `.vsix` we sent you.
 
 ## Setup
 
-1. Install the test build:
+1. Install it (skip if you have it from the Marketplace):
    ```bash
-   code --install-extension o3de-development-tools-<version>-test.vsix
+   code --install-extension o3de-development-tools-<version>.vsix
    ```
 2. Open your O3DE **project folder** (the one with `project.json`) in VS Code.
-3. Open **Settings** (Ctrl+,), search `o3de experimental`, and turn
-   **O3DE ▸ Experimental: Linux Support** **ON**.
-   - Without this, the build/run/debug commands intentionally say *"targets
-     Windows"* — that's expected, not a bug. The flag activates the Linux paths.
+3. Nothing to turn on — the Linux paths are active by default. If the build/run
+   commands say Linux support is *turned off*, someone set **O3DE ▸ Linux Support**
+   (`o3de.linuxSupport`) to false in this project's `.vscode/settings.json`; set it
+   back to true.
 4. Reload the window (Ctrl+Shift+P ▸ *Developer: Reload Window*).
 
 ---

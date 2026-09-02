@@ -3,6 +3,42 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — 2026-09-01
+
+### Changed
+
+- **Linux is now a supported platform, on by default — O3DE Development Tools is a
+  Windows *and* Linux extension.** External testing confirmed the Linux build / run /
+  debug loop holds up for everyday use, so the paths that shipped dormant in 0.2.2 are
+  live out of the box: Configure, Build, Run, Stop, Run in Debug, C++ and Lua IntelliSense
+  and launch.json generation all work on Linux with no setting to flip. **Windows is
+  unchanged.** The toggle survives as an escape hatch, renamed to **`o3de.linuxSupport`**
+  (default **on**, per-project) — turn it off only if the Linux paths misbehave on your
+  machine. The old `o3de.experimental.linuxSupport` key is deprecated but still honoured,
+  so a tester's existing setting keeps working; the current key wins if both are set.
+  Still missing on Linux: gdb AZ-type pretty-printers, and the build's process-guard
+  remains a deliberate no-op.
+- The headless build's blocked-reason code `not-windows` is now `unsupported-platform` —
+  it no longer means "not Windows", since Linux is supported. It fires on unsupported
+  platforms (macOS) and when Linux support is switched off for the project.
+
+### Fixed
+
+- **The project's engine now resolves by directory, not by the manifest's legacy name map.**
+  `~/.o3de/o3de_manifest.json` registers engines two ways: `engines`, a plain list of engine
+  **directories** — the forward-looking form, and the only one still being written — and
+  `engines_path`, a legacy name → path map that is routinely stale or missing entries. A
+  project whose `project.json` names a generically-named engine (e.g. `"engine": "o3de"`)
+  often has no entry in that map at all, so it failed to resolve and the Class Creation
+  Wizard reported *"could not resolve the project's engine"* even with the engine sitting
+  right there in the workspace. Resolution is now directory-first: the engine folders in
+  **this workspace** are checked first (the "Source engine in workspace" you set up), then
+  every `engines` directory, matching on what each `engine.json` actually declares. If the
+  name matches nothing, a lone source engine in the workspace is used. `engines_path` is
+  consulted last and never ahead of the workspace's own engine, so a stale entry can no
+  longer win. This fixes the Class Wizard, Run / Run in Debug, launch.json generation, C++
+  and Lua IntelliSense, and the environment report alike.
+
 ## [0.2.2] — 2026-08-19
 
 ### Added

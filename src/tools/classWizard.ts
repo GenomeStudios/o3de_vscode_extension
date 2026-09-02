@@ -4,9 +4,10 @@
 //
 //  It runs through the engine's bundled Python (python/python.cmd) and needs
 //  --engine-path (the engine hosting the wizard) + --project-path (where to
-//  scaffold). We resolve the project's TARGET engine (project.json `engine` →
-//  manifest), then run that engine's wizard — the one it's registered against,
-//  not whatever copy happens to be open in the workspace.
+//  scaffold). We resolve the project's TARGET engine by DIRECTORY — the engine
+//  folder in this workspace, else a manifest-registered engine root whose
+//  engine.json declares the name project.json asks for — then run that engine's
+//  wizard.
 //
 //  Runs as a managed command, NOT in a terminal. A terminal was previously held
 //  open for the wizard's entire GUI lifetime, which needed two workarounds that
@@ -40,14 +41,13 @@ export async function launchClassWizard(): Promise<void> {
     return;
   }
 
-  // Resolve the engine THIS project targets (project.json `engine` → manifest),
-  // and run that engine's wizard — the one it's registered against.
+  // Resolve the engine THIS project targets (directory-first) and run its wizard.
   const project = readProject(projectPath);
   const engine = project ? resolveProjectEngine(project) : undefined;
   if (!engine) {
     void vscode.window.showErrorMessage(
-      "O3DE: could not resolve the project's engine. Ensure project.json's \"engine\" names a registered engine " +
-        "(o3de register --this-engine).",
+      "O3DE: could not resolve the project's engine. Add the engine folder to this workspace " +
+        "(Set Up Workspace…), or register it with `o3de register --this-engine`.",
     );
     return;
   }

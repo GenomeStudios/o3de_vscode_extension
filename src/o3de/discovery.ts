@@ -81,16 +81,71 @@ export function discoverEngineGems(): O3deGem[] {
 }
 
 // ---- Project → engine resolution -------------------------------------------
+//
+//  DIRECTORY-FIRST. A manifest registers engines two ways: `engines` — a plain
+//  list of engine DIRECTORIES, which is the forward-looking form and the only one
+//  still being written — and `engines_path`, a legacy name → path map that is
+//  routinely stale or missing entries (a generic engine_name like "o3de" often has
+//  none at all). Resolving through that map made a perfectly good engine sitting
+//  right in the workspace fail to resolve. So we work from directories: read each
+//  engine.json and match on what it actually declares. The name map is consulted
+//  last, and never ahead of an engine the user put in the workspace.
+
 /**
- * Resolve the engine a project targets: project.json `engine` (a NAME) →
- * manifest `engines_path` → the engine's marker file. Enables auto-suggesting
- * a project's engine source in the wizard.
+ * Engine roots the workspace itself contributes (the "Engine (source): …" folders).
+ * Injected at activation so this module stays vscode-free; defaults to none, which
+ * is what the pure tests and any non-vscode caller see.
+ */
+let workspaceEngineRoots: () => string[] = () => [];
+
+export function setWorkspaceEngineRoots(provider: () => string[]): void {
+  workspaceEngineRoots = provider;
+}
+
+/** Every engine directory we know about, workspace folders first (they win). */
+function candidateEngineRoots(): string[] {
+  const roots = [...workspaceEngineRoots(), ...(readManifest()?.engines ?? [])];
+  const seen = new Set<string>();
+  return roots.filter((root) => {
+    const key = path.resolve(root).toLowerCase();
+    return seen.has(key) ? false : (seen.add(key), true);
+  });
+}
+
+/** The workspace's own source engine, if it carries exactly one unambiguous candidate. */
+function loneWorkspaceSourceEngine(): O3deEngine | undefined {
+  const engines = workspaceEngineRoots()
+    .map((root) => readEngine(root))
+    .filter((engine): engine is O3deEngine => engine !== undefined && !engine.isSdkEngine);
+  return engines.length === 1 ? engines[0] : undefined;
+}
+
+/**
+ * Resolve the engine a project targets. In order:
+ *   1. an engine DIRECTORY whose engine.json declares project.json's `engine` name
+ *      (workspace folders before manifest `engines` roots),
+ *   2. the workspace's own source engine, whatever it calls itself — the user
+ *      pointed the workspace at it, so a name mismatch shouldn't block us,
+ *   3. the legacy `engines_path` name → path map, for manifests old enough that an
+ *      engine appears there and nowhere else.
  */
 export function resolveProjectEngine(project: O3deProject): O3deEngine | undefined {
-  if (!project.engine) {
-    return undefined;
+  const wanted = project.engine?.toLowerCase();
+
+  if (wanted) {
+    for (const root of candidateEngineRoots()) {
+      const engine = readEngine(root);
+      if (engine && engine.engineName.toLowerCase() === wanted) {
+        return engine;
+      }
+    }
   }
-  const manifest = readManifest();
-  const enginePath = manifest?.enginesByName[project.engine];
-  return enginePath ? readEngine(enginePath) : undefined;
+
+  const inWorkspace = loneWorkspaceSourceEngine();
+  if (inWorkspace) {
+    return inWorkspace;
+  }
+
+  const legacyPath = wanted ? readManifest()?.enginesByName[project.engine as string] : undefined;
+  return legacyPath ? readEngine(legacyPath) : undefined;
 }

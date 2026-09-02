@@ -90,7 +90,7 @@ export async function runBuildHeadless(params: HeadlessBuildParams): Promise<Bui
   });
 
   if (!isPlatformToolsEnabled()) {
-    return blocked("not-windows", platformDisabledMessage());
+    return blocked("unsupported-platform", platformDisabledMessage());
   }
 
   const bad = targets.filter((t) => !SAFE_TARGET.test(t));

@@ -21,11 +21,11 @@ import { DependencyStatus } from "../deps/dependencyStatus";
 import { BuildOptions } from "../build/buildOptions";
 import { firstWorkspaceProject } from "../build/projectResolve";
 import { discoverEngines, resolveProjectEngine } from "../o3de/discovery";
+import { isLinuxSupportEnabled } from "./platformSupport";
 import { projectBuildDir, fileApiReplyDir, platformBuildDir } from "../build/configureCommand";
 import { resolveRunnable } from "../build/run";
 import { readManifest } from "../o3de/manifest";
 import { primaryO3deFolder, enableStateForFolder } from "../workspace/projectScope";
-import { isLinuxSupportEnabled } from "./experimental";
 import { log } from "../log";
 
 // ---- Small formatting helpers ----------------------------------------------
@@ -72,7 +72,7 @@ function sectionHeader(extensionVersion: string): string[] {
   if (distro) {
     lines.push(row(["Linux distro", distro]));
   }
-  lines.push(row(["Experimental Linux support", isLinuxSupportEnabled(primaryO3deFolder()?.uri) ? "ON" : "off"]));
+  lines.push(row(["Linux support", isLinuxSupportEnabled(primaryO3deFolder()?.uri) ? "on" : "OFF (disabled in settings)"]));
   return lines;
 }
 

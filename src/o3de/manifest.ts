@@ -10,8 +10,8 @@ import * as os from "os";
 import * as path from "path";
 
 export interface O3deManifest {
-  engines: string[]; // engine root paths
-  enginesByName: Record<string, string>; // engine name → path
+  engines: string[]; // engine root DIRECTORIES — the forward form; resolve from these
+  enginesByName: Record<string, string>; // LEGACY `engines_path` name → path; fallback only
   projects: string[]; // project root paths
   gems: string[]; // external_subdirectories (registered gem paths)
   defaultProjectsFolder?: string;

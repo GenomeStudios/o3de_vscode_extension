@@ -1,7 +1,7 @@
 {
   "name": "o3de-development-tools",
   "displayName": "O3DE Development Tools",
-  "description": "Developer companion for Open 3D Engine (O3DE): guided workspace setup, one-click CMake build & run, and C++ IntelliSense — for VS Code on Windows, with experimental Linux support.",
+  "description": "Developer companion for Open 3D Engine (O3DE): guided workspace setup, one-click CMake build & run, and C++ IntelliSense — for VS Code on Windows and Linux.",
   "version": "0.2.2",
   "icon": "media/icon.png",
   "publisher": "GenomeStudiosInc",
@@ -80,11 +80,18 @@
           "default": true,
           "markdownDescription": "When LLM connections are enabled, automatically write/merge the `o3de` server entry into your project's `.mcp.json` (created if absent, other servers preserved) so a client like Claude Code finds it with no copy-paste. Disabling LLM connections removes the entry again. Turn this off to manage `.mcp.json` yourself (use **O3DE: Show LLM Connection Info** to copy the block)."
         },
+        "o3de.linuxSupport": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "**Enable the Linux build/run/debug paths.** On by default — O3DE Development Tools supports Windows and Linux. On Linux the toolchain is gcc/clang + Ninja Multi-Config (no MSVC), inherited from your shell. Turn this **off** to make O3DE build/configure/run stand down on Linux, which is only useful as an escape hatch if the Linux paths misbehave on your machine. Per-project (stored in `.vscode/settings.json`). Use **O3DE: Copy Environment Report** when filing a Linux bug so the report is self-diagnosing."
+        },
         "o3de.experimental.linuxSupport": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "scope": "resource",
-          "markdownDescription": "**(Experimental) Enable Linux build/run/debug paths.** Off by default. When off, O3DE build/configure/run behave as they do today (Windows-focused); on Linux the affected commands report that they target Windows. Turn **on** to activate the experimental Linux toolchain paths (gcc/clang + Ninja, no MSVC) — intended for testers helping validate Linux support. Per-project (stored in `.vscode/settings.json`). Use **O3DE: Copy Environment Report** when filing a Linux bug so the report is self-diagnosing."
+          "markdownDeprecationMessage": "**Deprecated** — Linux support is no longer experimental and is on by default. Use `o3de.linuxSupport` instead; this key is still honoured so an existing setting keeps working.",
+          "markdownDescription": "Deprecated alias for `o3de.linuxSupport`."
         }
       }
     },

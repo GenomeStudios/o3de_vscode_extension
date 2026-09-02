@@ -11,6 +11,8 @@
 
 import * as vscode from "vscode";
 import { initLog, log } from "./log";
+import { setWorkspaceEngineRoots } from "./o3de/discovery";
+import { workspaceEngineRoots } from "./build/workspaceFolders";
 import { ensureVisualStudio } from "./env/visualStudioGuard";
 import { openDeveloperTerminal } from "./env/developerTerminal";
 import { ensureNinja } from "./build/ninjaGuard";
@@ -63,6 +65,10 @@ import {
 // ---- Activation ------------------------------------------------------------
 export function activate(context: vscode.ExtensionContext): void {
   initLog(context);
+  // Engine resolution is directory-first: let it see the engine folders THIS
+  // workspace carries, so a project whose project.json names a generically-named
+  // engine ("o3de") resolves off the directory rather than the manifest name map.
+  setWorkspaceEngineRoots(workspaceEngineRoots);
   // The plain channel that raw build/configure/tool output streams to. Separate
   // from log() so cmake and ninja read verbatim, undecorated by log levels.
   initCommandOutput(context);

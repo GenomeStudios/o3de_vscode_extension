@@ -27,7 +27,7 @@ export interface BuildDiagnostic {
 
 /** Why a headless build could not run (vs. ran-and-failed, which is ok:false). */
 export type BuildBlockedReason =
-  | "not-windows" // platform not enabled (Windows always; Linux behind the experimental flag)
+  | "unsupported-platform" // Windows/Linux only, and Linux can be switched off per project
   | "no-project"
   | "no-msvc"
   | "no-toolchain" // compiler env could not be established (MSVC on Windows, gcc/clang on Linux)
