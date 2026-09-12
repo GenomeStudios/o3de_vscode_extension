@@ -15,7 +15,8 @@ import { findVisualStudioInstalls, pickBestInstall } from "../env/visualStudio";
 import { findNinja } from "../build/ninja";
 import { readManifest } from "../o3de/manifest";
 import { discoverEngines } from "../o3de/discovery";
-import { readProject, readEngine } from "../o3de/identity";
+import { readProject } from "../o3de/identity";
+import { workspaceSourceEngines } from "../build/workspaceFolders";
 import { isO3deWorkspace, primaryO3deFolder, enableStateForFolder } from "../workspace/projectScope";
 import { llmConnectionStatus } from "../mcp/server";
 
@@ -111,9 +112,8 @@ export function detectEngine(): CheckResult {
 // the global manifest. It's what actually lets you browse engine code + drives
 // C++ IntelliSense. A project on a prebuilt SDK engine won't have one until added.
 export function detectSourceEngine(): CheckResult {
-  const engines = (vscode.workspace.workspaceFolders ?? [])
-    .map((f) => readEngine(f.uri.fsPath))
-    .filter((e): e is NonNullable<typeof e> => e !== undefined && !e.isSdkEngine);
+  // Same lookup the IntelliSense redirect uses — they must never disagree again.
+  const engines = workspaceSourceEngines();
   return engines.length > 0
     ? { state: "ok", detail: engines.map((e) => e.engineName).join(", ") }
     : { state: "missing" };

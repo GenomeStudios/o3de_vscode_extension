@@ -11,7 +11,9 @@
 //                           disable when there's no project to act on.
 //    UTILITIES              Show Log · Terminal · Editor Log · Error Log
 //    ── divider ──
-//    ▸ CONFIGURATION        collapsible — Build Options / Project Setup / Launch
+//    ▸ C++                  collapsible — Build Options / Launch Options / Configuration
+//    ▸ LUA                  collapsible — Scripts
+//    ▸ INTELLISENSE         collapsible — Status / C++ / Lua (both languages in one place)
 //    ▸ ONBOARDING           collapsible — Prerequisites / Workspace (status dots)
 //
 //  Collapse state persists via the webview state API. Status: satisfied checks
@@ -29,6 +31,7 @@ import { launchArgsLabel } from "../build/runCommand";
 import { DependencyStatus } from "../deps/dependencyStatus";
 import { buildOnboardingModel, resolveGuidedAction, View } from "../deps/registry";
 import { runGuidedAction } from "../deps/actions";
+import { EngineModeReport, engineModeDetail, engineModeLabel, workspaceEngineMode } from "../intellisense/engineMode";
 import { loadIcon } from "./svgAssets";
 import { getNonce } from "./webviewUtil";
 
@@ -56,6 +59,7 @@ const COMMANDS: Record<string, string> = {
   setCoreCount: "o3de.setCoreCount",
   configureProject: "o3de.configureProject",
   generateCppProperties: "o3de.generateCppProperties",
+  showEngineMode: "o3de.showEngineMode",
   classWizard: "o3de.classWizard",
   selectRunTarget: "o3de.selectRunTarget",
   setLaunchArgs: "o3de.setLaunchArgs",
@@ -80,8 +84,14 @@ function statusPayload(deps: DependencyStatus): StatusPayload {
 
 // The two language sections mirror each other: "always-use" first, "sometimes-
 // use" next, and one-and-done setup lives in Onboarding (not here). C++ and Lua
-// each render into their own collapsible section.
-function configPayload(options: BuildOptions, onboarding: OnboardingStatus, activity: ActivitySnapshot) {
+// each render into their own collapsible section. IntelliSense for BOTH languages
+// lives in its own section, so everything about code insight is found in one place.
+function configPayload(
+  options: BuildOptions,
+  onboarding: OnboardingStatus,
+  activity: ActivitySnapshot,
+  engineMode: EngineModeReport,
+) {
   // Configure is a config ROW rather than a button, but it still TOGGLES: while a
   // configure runs the row becomes its own Stop control (the progress itself is on
   // the bar up top). Clicking it used to just report "already running", which gave
@@ -120,7 +130,6 @@ function configPayload(options: BuildOptions, onboarding: OnboardingStatus, acti
                 cmd: "stopConfigure",
               }
             : { label: "Configure Project", cmd: "configureProject" },
-          { label: "Generate C++ IntelliSense", cmd: "generateCppProperties" },
           { label: "Add Gems / Folders", cmd: "addGems" },
         ],
       },
@@ -133,8 +142,26 @@ function configPayload(options: BuildOptions, onboarding: OnboardingStatus, acti
           { label: "Debug Lua File", cmd: "debugLuaFile" },
         ],
       },
+    ],
+    intellisense: [
       {
-        title: "Configuration",
+        // Readouts: the value is the measured state; hover for the full explanation.
+        title: "Status",
+        rows: [
+          {
+            label: "Engine Sources",
+            value: engineModeLabel(engineMode),
+            tip: engineModeDetail(engineMode),
+            cmd: "showEngineMode",
+          },
+        ],
+      },
+      {
+        title: "C++",
+        rows: [{ label: "Generate C++ IntelliSense", cmd: "generateCppProperties" }],
+      },
+      {
+        title: "Lua",
         rows: [{ label: "Generate Lua IntelliSense", cmd: "generateLuaIntelliSense" }],
       },
     ],
@@ -220,7 +247,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const postConfig = (): void =>
       void webview.postMessage({
         type: "config",
-        ...configPayload(this.options, this.onboarding, this.buildState.activity),
+        ...configPayload(this.options, this.onboarding, this.buildState.activity, workspaceEngineMode()),
       });
     const postDeps = (): void =>
       void webview.postMessage({ type: "deps", model: buildOnboardingModel(this.deps.resultMap, this.deps.view) });
@@ -239,6 +266,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       this.deps.onDidChange(() => {
         postStatus(); // the header C++/Lua readouts derive from deps
         postDeps();
+        postConfig(); // IntelliSense ▸ Engine Sources tracks the workspace's engines (a re-scan follows folder changes)
       }),
       // Re-detect whenever the panel is revealed — catches changes made outside
       // the extension (enabling a gem, generating a dump via the live Editor).
@@ -269,7 +297,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       running: this.runState.isRunning,
       activity: this.buildState.activity,
       status: statusPayload(this.deps),
-      config: configPayload(this.options, this.onboarding, this.buildState.activity),
+      config: configPayload(this.options, this.onboarding, this.buildState.activity, workspaceEngineMode()),
       deps: buildOnboardingModel(this.deps.resultMap, this.deps.view),
       collapse: this.getCollapse(),
     });
@@ -524,6 +552,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       <div class="sec-body"><div id="lua"></div></div>
     </div>
 
+    <div class="sec" id="sec-intellisense">
+      <button class="sec-hdr" data-key="intellisense"><span class="chev">▶</span><span>IntelliSense</span></button>
+      <div class="sec-body"><div id="intellisense"></div></div>
+    </div>
+
     <div class="sec" id="sec-setup">
       <button class="sec-hdr" data-key="setup"><span class="chev">▶</span><span>Setup &amp; Onboarding</span><span class="hdr-actions"><span class="hdr-rescan" id="setup-rescan" title="Re-scan dependencies (e.g. after enabling a gem or generating a dump)">↻</span><span class="sec-status" id="setup-status"></span></span></button>
       <div class="sec-body"><div id="deps"></div></div>
@@ -540,6 +573,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const statusEl = document.getElementById('status');
     const cppEl = document.getElementById('cpp');
     const luaEl = document.getElementById('lua');
+    const intellisenseEl = document.getElementById('intellisense');
     const depsEl = document.getElementById('deps');
     const setupStatus = document.getElementById('setup-status');
     const wizardBtn = document.getElementById('classWizard');
@@ -560,8 +594,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     // ---- Collapsible sections ----
     // State is persisted in the extension's workspaceState (survives full VS Code
     // restarts, unlike webview getState which can drop when the view is disposed).
-    // Defaults: C++ open, Lua + Onboarding closed.
-    const DEFAULT_COLLAPSE = { cpp: true, lua: false, setup: false };
+    // Defaults: C++ + IntelliSense open (IntelliSense is where you go when code insight is
+    // wrong), Lua + Onboarding closed.
+    const DEFAULT_COLLAPSE = { cpp: true, lua: false, intellisense: true, setup: false };
     const collapse = Object.assign({}, DEFAULT_COLLAPSE, INITIAL.collapse || {});
     function persistCollapse(key, open) {
       collapse[key] = open;
@@ -696,6 +731,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     // ---- Row builders ----
     function valueRow(r, withDot) {
       const row = document.createElement('button'); row.className = 'cfg-row';
+      if (r.tip) { row.title = r.tip; } // status readouts carry their full explanation on hover
       const lead = document.createElement('span'); lead.className = 'rowlead';
       if (withDot && r.ok !== undefined) {
         const d = document.createElement('span'); d.className = 'dot ' + (r.ok ? 'okdot' : 'baddot'); lead.appendChild(d);
@@ -722,6 +758,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       canBuild = cfg.canBuild; canRun = cfg.canRun; applyEnable();
       renderSections(cppEl, cfg.cpp);
       renderSections(luaEl, cfg.lua);
+      renderSections(intellisenseEl, cfg.intellisense);
     }
 
     // ---- Guided setup (intent ramp + acquisition) ----

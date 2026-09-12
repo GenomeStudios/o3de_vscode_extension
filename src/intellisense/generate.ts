@@ -92,6 +92,11 @@ function emitCppProperties(project: O3deProject, options: BuildOptions): number 
     return undefined;
   }
 
+  // DECISION (2026-09-12): this static file deliberately keeps the UNION of every target's defines,
+  // unlike the live provider's fallback, which intersects them (agreedCompile). It is ONE config for
+  // EVERY file, used only when the provider is inactive — own gem code would lose defines such as
+  // IMGUI_ENABLED under an intersection. Known cost: contradictory macros (O3DE_HEADLESS_SERVER=1,
+  // many O3DE_GEM_NAME values) can grey out live code here. If that surfaces, revisit — plan Q11.
   const consolidated = consolidateTargets(reply.targets.map((t) => t.compile));
   const mappings = buildMappings(
     project,

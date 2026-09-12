@@ -5,6 +5,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [pending_version] — 2026-09-12
 
+### Added
+
+- **An IntelliSense section on the dashboard**, covering C++ and Lua in one place, between the
+  Lua and Setup & Onboarding sections. It opens by default — it's where to look when code
+  insight seems wrong.
+- **IntelliSense ▸ Status ▸ Engine Sources** shows how far C++ navigation can reach into the
+  engine, and why:
+  - **Indexed (source engine)** — your project builds against a source engine, so engine code is
+    part of the build.
+  - **Redirected to *name*** — your project builds against a prebuilt SDK engine (which ships
+    headers only), and engine navigation is sent to the source engine in your workspace instead.
+  - **Headers only (SDK engine)** — a prebuilt SDK engine with no source engine in the workspace:
+    Go to Definition cannot reach engine implementation, because an SDK install contains no
+    engine `.cpp` files.
+  - **Not resolved** — no project found, or its engine couldn't be resolved.
+
+  Hover the row for the full explanation, or click it (also available as **O3DE: Show IntelliSense
+  Engine Mode**). When the mode is *Headers only* and a source engine is registered on your
+  machine, the message offers **Set Up Workspace…** to add it; when none is registered, no remedy
+  is offered, because there isn't one.
+
+### Changed
+
+- **Generate C++ IntelliSense** and **Generate Lua IntelliSense** moved from the C++ and Lua
+  sections into the new IntelliSense section. The Lua section's now-empty *Configuration* group is
+  gone. The commands themselves, and the Setup & Onboarding checklist, are unchanged.
+
 ### Fixed
 
 - **Go to Definition now reaches your source engine in hand-built workspaces.** When a
@@ -27,6 +54,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   each removal is logged to the O3DE output channel. It is deliberately conservative: only
   entries pointing at a missing file are removed, entries containing unresolved `${…}`
   variables are kept, and your user-wide settings are never touched.
+- **Engine source no longer shows live code as inactive.** Files that no single build target
+  owns — engine source you reach through the source-engine redirect, gems that aren't enabled
+  in the project — got a fallback built from the defines of **every** target combined. On a
+  real project that meant contradictory macros all at once: over a dozen different
+  `O3DE_GEM_NAME` values, and a headless-server flag that made the C/C++ extension grey out
+  client-side code (for example the `#if !O3DE_HEADLESS_SERVER` blocks in
+  `GameApplication.cpp`) as if it were never compiled. The fallback now keeps only the defines
+  that **every** target agrees on — the build configuration and platform baseline — while
+  still offering every include path, so headers resolve exactly as before. Files a single
+  target owns are unaffected.
+- **Headers listed by an interface-only target no longer lose all IntelliSense.** A target that
+  only lists headers without compiling anything (such as a gem's `.API` target) could overwrite
+  those headers' configuration with an empty one, leaving every `#include` in them unresolved.
+  Only targets that actually compile now decide a file's configuration.
 
 ## [0.2.3] — 2026-09-02
 

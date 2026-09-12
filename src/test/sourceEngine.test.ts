@@ -15,7 +15,12 @@ import * as assert from "assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { FolderCandidate, orderEngineRootsSourceFirst, pickSourceEngineFolder } from "../build/workspaceFolders";
+import {
+  FolderCandidate,
+  orderEngineRootsSourceFirst,
+  pickSourceEngineFolder,
+  sourceEngineFolders,
+} from "../build/workspaceFolders";
 
 // ---- Fixture ---------------------------------------------------------------
 let root: string;
@@ -86,6 +91,34 @@ suite("pickSourceEngineFolder (structural, not name-based)", () => {
 
   test("no folders at all → undefined", () => {
     assert.strictEqual(pickSourceEngineFolder([]), undefined);
+  });
+});
+
+suite("sourceEngineFolders (the single source of truth)", () => {
+  setup(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "o3de-srclist-"));
+  });
+
+  teardown(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test("lists every source engine, named first, and never an SDK or a plain folder", () => {
+    const folders = [
+      plainFolder("gs_play"),
+      engineFolder("o3de_sourcedev", false),
+      engineFolder("GS_Play_Engine", true),
+      engineFolder("Engine (source): O3DEEditor", false),
+    ];
+    assert.deepStrictEqual(
+      sourceEngineFolders(folders).map((f) => f.name),
+      ["Engine (source): O3DEEditor", "o3de_sourcedev"],
+    );
+  });
+
+  test("pickSourceEngineFolder is exactly the first of sourceEngineFolders", () => {
+    const folders = [engineFolder("o3de_sourcedev", false), engineFolder("Engine (source): O3DEEditor", false)];
+    assert.strictEqual(pickSourceEngineFolder(folders)?.name, sourceEngineFolders(folders)[0].name);
   });
 });
 

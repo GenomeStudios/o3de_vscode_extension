@@ -46,19 +46,30 @@ function engineRank(folder: FolderCandidate, readEngineAt: (dir: string) => O3de
 }
 
 /**
- * The source engine among these folders, or undefined when none carries one.
+ * Every source-engine folder among these, named ones first (stable otherwise).
+ * THE single definition of "a source engine in the workspace" — the onboarding check, the
+ * IntelliSense redirect and the engine-mode status all go through here. Two separate
+ * lookups once disagreed (onboarding said yes while the redirect silently did nothing).
  * Qualifies STRUCTURALLY: an engine.json that does not declare `sdk_engine: true`.
  * `readEngineAt` is injected so this stays pure and unit-testable.
  */
+export function sourceEngineFolders(
+  folders: FolderCandidate[],
+  readEngineAt: (dir: string) => O3deEngine | undefined = readEngine,
+): FolderCandidate[] {
+  return folders
+    .map((folder) => ({ folder, rank: engineRank(folder, readEngineAt) }))
+    .filter((entry) => entry.rank < 2)
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => entry.folder);
+}
+
+/** The preferred source engine among these folders, or undefined when none carries one. */
 export function pickSourceEngineFolder(
   folders: FolderCandidate[],
   readEngineAt: (dir: string) => O3deEngine | undefined = readEngine,
 ): FolderCandidate | undefined {
-  const sources = folders.filter((folder) => engineRank(folder, readEngineAt) < 2);
-  if (sources.length === 0) {
-    return undefined;
-  }
-  return sources.find((folder) => folder.name.startsWith(SOURCE_ENGINE_NAME_HINT)) ?? sources[0];
+  return sourceEngineFolders(folders, readEngineAt)[0];
 }
 
 /** Engine folders with SOURCE engines first — the order callers treat as preference. */
@@ -83,6 +94,13 @@ function folderCandidates(): FolderCandidate[] {
     path: folder.uri.fsPath,
     name: folder.name,
   }));
+}
+
+/** Every source engine in the workspace, preferred first. */
+export function workspaceSourceEngines(): O3deEngine[] {
+  return sourceEngineFolders(folderCandidates())
+    .map((folder) => readEngine(folder.path))
+    .filter((engine): engine is O3deEngine => engine !== undefined);
 }
 
 /** The workspace's source-engine folder — the F12 / natvis target. */

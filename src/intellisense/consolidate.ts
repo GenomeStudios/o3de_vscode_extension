@@ -1,10 +1,12 @@
 // ============================================================================
 //  Consolidation (pure) — the "one source" data layer the user asked for.
 //
-//  Unions include paths + defines across ALL targets in a config into a single
-//  browse-everything set (deduped, normalized, stable order). Coarser than
-//  per-file, but it makes every AZ type / engine header resolve for completion
-//  and navigation. Per-file precision is the later live provider.
+//  Two merges over a set of targets:
+//    • consolidateTargets — the UNION of everything (deduped, normalized, stable
+//      order). Right for navigation (browse path) where reach matters.
+//    • agreedCompile — union the includes, INTERSECT the defines + forced includes.
+//      Right for a file with no single owner, where contradictory macros would
+//      silently mis-resolve #if branches.
 // ============================================================================
 
 import { IncludeEntry, TargetCompile } from "./fileApi";
@@ -55,4 +57,53 @@ export function consolidateTargets(targets: TargetCompile[]): ConsolidatedCompil
     }
   }
   return { includes, defines, forcedIncludes, standard };
+}
+
+// ---- Agreed compile — for files with no single owning target ---------------
+/** Values present in EVERY list, in the first list's order, deduped by `key`. */
+function intersectAll(lists: string[][], key: (value: string) => string): string[] {
+  if (lists.length === 0) {
+    return [];
+  }
+  const others = lists.slice(1).map((list) => new Set(list.map(key)));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of lists[0]) {
+    const k = key(value);
+    if (!seen.has(k) && others.every((set) => set.has(k))) {
+      seen.add(k);
+      out.push(value);
+    }
+  }
+  return out;
+}
+
+/**
+ * What a file compiles with when no SINGLE target owns it — engine source reached
+ * through the source-engine redirect, a gem not enabled in this project, or a file
+ * several targets share. One rule, "union includes, intersect semantics":
+ *
+ *   - Include paths: the UNION. A header any target can reach should still resolve.
+ *   - Defines + forced includes: the INTERSECTION. Only what EVERY target agrees on.
+ *
+ * A union of defines is self-contradictory on a real project — measured on gs_play it
+ * carried 14 different `O3DE_GEM_NAME=` values at once and `O3DE_HEADLESS_SERVER=1`,
+ * which greys out client code as inactive in every file that falls back. An
+ * intersection cannot contradict itself, and it is order-independent, so the result is
+ * deterministic across refreshes by construction.
+ */
+export function agreedCompile(targets: TargetCompile[]): ConsolidatedCompile {
+  const union = consolidateTargets(targets);
+  return {
+    includes: union.includes,
+    defines: intersectAll(
+      targets.map((target) => target.defines),
+      (define) => define, // exact text: FOO=1 and FOO=2 are different, so a conflict drops out
+    ),
+    forcedIncludes: intersectAll(
+      targets.map((target) => target.forcedIncludes.map(normalizePath)),
+      (forced) => forced.toLowerCase(),
+    ),
+    standard: union.standard,
+  };
 }

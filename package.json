@@ -240,6 +240,10 @@
         "title": "O3DE: Generate C++ IntelliSense"
       },
       {
+        "command": "o3de.showEngineMode",
+        "title": "O3DE: Show IntelliSense Engine Mode"
+      },
+      {
         "command": "o3de.selectGenerator",
         "title": "O3DE: Select CMake Generator"
       },

@@ -6,7 +6,7 @@ import {
   parseCompilerPath,
   pickConfiguration,
 } from "../intellisense/fileApi";
-import { consolidateTargets } from "../intellisense/consolidate";
+import { agreedCompile, consolidateTargets } from "../intellisense/consolidate";
 import { remapPath, remapIncludes, RootMapping } from "../intellisense/remap";
 import { buildCppConfiguration, cppStandardFromApi, mergeCppProperties } from "../intellisense/cppProperties";
 import { normalizePath, isUnderRoot, replaceRoot, uniqueStable } from "../intellisense/paths";
@@ -136,6 +136,62 @@ suite("intellisense/consolidate", () => {
     assert.deepStrictEqual(c.defines, ["WIN64", "AZ_PROFILE_BUILD", "NDEBUG"]);
     assert.deepStrictEqual(c.forcedIncludes, ["D:/Eng/Compat/VSCompat.h"]); // normalized + deduped
     assert.strictEqual(c.standard, "20"); // first seen
+  });
+});
+
+suite("intellisense/consolidate.agreedCompile (union includes, intersect semantics)", () => {
+  // Shapes taken from gs_play's real reply: a runtime gem module vs a launcher.
+  const gem = {
+    includes: [{ path: "D:/Eng/Code/Framework/AzCore/." }, { path: "D:/Gems/gs_core/Code/Include" }],
+    defines: ["AZ_PROFILE_BUILD", "WIN64", "GS_Core_EXPORTS", "O3DE_GEM_NAME=GS_Core"],
+    forcedIncludes: ["D:/Eng/Compat/VSCompat.h"],
+    standard: "20",
+  };
+  const headless = {
+    includes: [{ path: "D:\\Eng\\Code\\Framework\\AzCore\\." }, { path: "D:/Proj/Launcher" }],
+    defines: ["WIN64", "AZ_PROFILE_BUILD", "O3DE_HEADLESS_SERVER=1", "O3DE_GEM_NAME=GS_Unit"],
+    forcedIncludes: ["D:\\eng\\compat\\vscompat.h"], // same file, different separators + case
+    standard: "20",
+  };
+
+  test("defines are the INTERSECTION — only what every target agrees on", () => {
+    assert.deepStrictEqual(agreedCompile([gem, headless]).defines, ["AZ_PROFILE_BUILD", "WIN64"]);
+  });
+
+  test("a macro with conflicting values drops out entirely rather than picking one", () => {
+    assert.ok(!agreedCompile([gem, headless]).defines.some((d) => d.startsWith("O3DE_GEM_NAME")));
+  });
+
+  test("a one-target flag like O3DE_HEADLESS_SERVER=1 never leaks into shared files", () => {
+    assert.ok(!agreedCompile([gem, headless]).defines.includes("O3DE_HEADLESS_SERVER=1"));
+  });
+
+  test("include paths stay the UNION — a header any target reaches still resolves", () => {
+    assert.deepStrictEqual(agreedCompile([gem, headless]).includes.map((i) => i.path), [
+      "D:/Eng/Code/Framework/AzCore",
+      "D:/Gems/gs_core/Code/Include",
+      "D:/Proj/Launcher",
+    ]);
+  });
+
+  test("forced includes intersect on the normalized, case-insensitive path", () => {
+    assert.deepStrictEqual(agreedCompile([gem, headless]).forcedIncludes, ["D:/Eng/Compat/VSCompat.h"]);
+  });
+
+  test("order-independent — the same answer whichever target comes first", () => {
+    const forward = agreedCompile([gem, headless]);
+    const reversed = agreedCompile([headless, gem]);
+    assert.deepStrictEqual(new Set(forward.defines), new Set(reversed.defines));
+    assert.deepStrictEqual(new Set(forward.forcedIncludes.map((f) => f.toLowerCase())), new Set(reversed.forcedIncludes.map((f) => f.toLowerCase())));
+  });
+
+  test("a single target is its own agreed compile", () => {
+    assert.deepStrictEqual(agreedCompile([gem]).defines, gem.defines);
+  });
+
+  test("no targets → empty, never a crash", () => {
+    const empty = agreedCompile([]);
+    assert.deepStrictEqual([empty.includes, empty.defines, empty.forcedIncludes], [[], [], []]);
   });
 });
 

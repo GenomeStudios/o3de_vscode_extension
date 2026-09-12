@@ -30,6 +30,9 @@ export interface TargetCompile {
 export interface LoadedTarget {
   compile: TargetCompile;
   sourcePaths: string[]; // C/C++ sources listed for the target (relative to project root, or absolute)
+  /** True when the target has compile groups. INTERFACE / UTILITY targets can LIST sources
+   *  but carry no compile data, so they must never decide a file's IntelliSense config. */
+  compiles: boolean;
 }
 
 /** An EXECUTABLE target — a runnable the Run Target picker can offer. */
@@ -219,7 +222,11 @@ export function loadFileApiReply(replyDir: string, configName: string): FileApiR
   for (const target of config.targets) {
     const targetJson = readJson<TargetJson>(path.join(replyDir, target.jsonFile));
     if (targetJson) {
-      targets.push({ compile: parseTarget(targetJson), sourcePaths: parseTargetSourcePaths(targetJson) });
+      targets.push({
+        compile: parseTarget(targetJson),
+        sourcePaths: parseTargetSourcePaths(targetJson),
+        compiles: (targetJson.compileGroups ?? []).length > 0,
+      });
     }
   }
 

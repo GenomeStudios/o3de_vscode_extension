@@ -29,6 +29,7 @@ import { loadFileApiReply } from "./fileApi";
 import { buildProviderModel, ProviderModel } from "./providerModel";
 import { intelliSenseModeFor } from "./cppProperties";
 import { detectBuildEngineRoot } from "./engineRoot";
+import { detectEngineMode, engineModeDetail } from "./engineMode";
 import { RootMapping } from "./remap";
 import { normalizePath, uniqueStable } from "./paths";
 
@@ -88,6 +89,7 @@ class O3deConfigurationProvider implements CustomConfigurationProvider {
       }
       const includePaths = reply.targets.flatMap((t) => t.compile.includes.map((i) => i.path));
       const model = buildProviderModel(reply, project.path, buildAbsoluteMappings(project, includePaths));
+      log().info(`IntelliSense engine (${project.projectName}): ${engineModeDetail(detectEngineMode(project, includePaths))}`);
       for (const [key, value] of model.perFile) {
         perFile.set(key, value);
       }

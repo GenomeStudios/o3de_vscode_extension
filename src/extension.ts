@@ -42,6 +42,7 @@ import { BuildState } from "./build/buildState";
 import { initCommandOutput } from "./build/commandOutput";
 import { generateCppProperties, refreshCppPropertiesOnStartup } from "./intellisense/generate";
 import { registerConfigurationProvider } from "./intellisense/provider";
+import { showEngineMode } from "./intellisense/engineMode";
 import { registerLuaDebug, debugLuaFile } from "./lua/debug/debugAdapter";
 import { registerLuaHandoff } from "./lua/handoff";
 import { generateLuaIntelliSense, generateLuaStubsFromDump } from "./lua/intellisense/intelliSense";
@@ -422,6 +423,11 @@ export function activate(context: vscode.ExtensionContext): void {
     void generateCppProperties(buildOptions);
   });
 
+  // Command: explain how far C++ navigation reaches into the engine (dashboard IntelliSense ▸ Status).
+  const showEngineModeCmd = vscode.commands.registerCommand("o3de.showEngineMode", () => {
+    void showEngineMode();
+  });
+
   // Commands: choose the CMake generator / build config (shown in the tab, persisted).
   const selectGenerator = vscode.commands.registerCommand("o3de.selectGenerator", async () => {
     const pick = await vscode.window.showQuickPick(generatorsForPlatform(), {
@@ -600,6 +606,7 @@ export function activate(context: vscode.ExtensionContext): void {
     runDebug,
     stop,
     genCpp,
+    showEngineModeCmd,
     selectGenerator,
     selectConfig,
     selectCompiler,
