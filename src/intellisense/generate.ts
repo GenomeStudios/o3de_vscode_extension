@@ -27,6 +27,7 @@ import { detectBuildEngineRoot } from "./engineRoot";
 import { remapIncludes, remapPath, RootMapping } from "./remap";
 import { buildCppConfiguration, mergeCppProperties } from "./cppProperties";
 import { uniqueStable } from "./paths";
+import { clearDeadCompileCommands } from "./staleSettings";
 
 const CONFIG_NAME = "O3DE";
 const CONFIGURATION_PROVIDER_KEY = "C_Cpp.default.configurationProvider";
@@ -163,6 +164,9 @@ export async function generateCppProperties(options: BuildOptions): Promise<void
     );
     return;
   }
+  // Our provider now owns cpptools config here, so a compileCommands entry pointing at a deleted
+  // build tree (the old n_cc approach) is dead weight — clear it.
+  await clearDeadCompileCommands();
   void vscode.window.showInformationMessage(
     `O3DE: C++ IntelliSense written for ${project.projectName} (${count} include paths). ` +
       "The C/C++ extension is now indexing — wait for the “Parsing workspace” spinner to finish " +
@@ -187,5 +191,7 @@ export async function refreshCppPropertiesOnStartup(options: BuildOptions): Prom
   }
   if (refreshed > 0) {
     log().info(`IntelliSense: auto-refreshed ${refreshed} project(s) on startup.`);
+    // Only where we are actively providing IntelliSense — never touch a workspace we don't manage.
+    await clearDeadCompileCommands();
   }
 }

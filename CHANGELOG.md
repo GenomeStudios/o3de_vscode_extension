@@ -3,6 +3,31 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — 2026-09-12
+
+### Fixed
+
+- **Go to Definition now reaches your source engine in hand-built workspaces.** When a
+  project builds against a prebuilt SDK engine, the extension redirects engine include paths
+  to a source engine you keep in the workspace, so F12 lands on real `.cpp` files instead of
+  dead-ending in the SDK's headers (an SDK install ships headers only). That redirect only
+  recognised the source-engine folder by the name the **Setup Workspace** command gives it
+  (`Engine (source): …`). A workspace you assembled yourself — or one created before that
+  naming existed — names the folder plainly, so the redirect silently did nothing and
+  engine symbols kept resolving into the SDK. The source engine is now identified by what it
+  **is**: a workspace folder whose `engine.json` does not declare `sdk_engine: true`. Folder
+  names no longer matter. When several source engines are present, an `Engine (source): …`
+  name still breaks the tie. Re-run **O3DE: Generate C++ IntelliSense** to pick it up.
+- **Dead `C_Cpp.default.compileCommands` entries are cleared.** Older setups pointed the C/C++
+  extension at a separate non-unity build's `compile_commands.json`. Once that build tree is
+  gone the setting can never be used and only adds noise alongside the extension's live
+  IntelliSense provider. When the extension generates or refreshes C++ IntelliSense for a
+  project, it now removes entries whose file **no longer exists**. **This edits your
+  workspace settings** (the `.code-workspace` file and each folder's `.vscode/settings.json`);
+  each removal is logged to the O3DE output channel. It is deliberately conservative: only
+  entries pointing at a missing file are removed, entries containing unresolved `${…}`
+  variables are kept, and your user-wide settings are never touched.
+
 ## [0.2.3] — 2026-09-02
 
 ### Changed
