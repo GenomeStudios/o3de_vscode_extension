@@ -108,7 +108,8 @@ function sectionEngineProject(): string[] {
   lines.push(
     row(["Workspace project", `${project.projectName} — ${project.path}`]),
     row(["Project engine ref", project.engine ?? "(unset)"]),
-    row(["Resolved target engine", targetEngine ? `${targetEngine.engineName} (${targetEngine.isSdkEngine ? "SDK" : "source"})` : "UNRESOLVED"]),
+    row(["Project engine path", project.enginePath ?? "(unset — legacy name-only record)"]), // user/project.json, wins when valid
+    row(["Resolved target engine", targetEngine ? `${targetEngine.engineName} (${targetEngine.isSdkEngine ? "SDK" : "source"}) — ${targetEngine.path}` : "UNRESOLVED"]),
     row(["RemoteTools gem", project.gemNames.includes("RemoteTools") ? "enabled" : "not enabled"]),
     row(["O3DE Tools enabled", folder ? enableStateForFolder(folder) : "unknown"]),
   );

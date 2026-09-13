@@ -22,8 +22,9 @@ export interface GuidedAction {
   label: string;
   // How the UI fulfils it. `command` runs a VS Code command; `winget` installs a
   // package; `extension` installs a VS Code extension; `url` opens docs/download;
-  // `longpaths` enables the registry flag; `enableGem` enables the RemoteTools gem.
-  kind: "command" | "winget" | "extension" | "url" | "longpaths" | "enableGem";
+  // `longpaths` enables the registry flag; `enableGem` enables the RemoteTools gem;
+  // `addToPath` appends a folder (payload) to the user PATH.
+  kind: "command" | "winget" | "extension" | "url" | "longpaths" | "enableGem" | "addToPath";
   payload: string;
 }
 
@@ -300,8 +301,25 @@ export const CHECKS: DependencyCheck[] = [
     tier: "optional",
     track: "optional",
     views: ["cpp"],
-    detect: () => d.detectExtension("ms-vscode.cmake-tools"),
+    detect: () => d.detectOptionalExtension("ms-vscode.cmake-tools"),
     action: { label: "Install CMake Tools", kind: "extension", payload: "ms-vscode.cmake-tools" },
+  },
+  {
+    id: "clangd",
+    label: "clangd extension",
+    what:
+      "Optional — the clangd C++ language server, for O3DE Development Tools' upcoming clangd IntelliSense mode " +
+      "(exact whole-project navigation and references). Two pieces: the clangd extension, and the clangd server " +
+      "it downloads. Until that mode is available, installing it runs clangd alongside the C/C++ extension " +
+      "without this project's compile data — and clangd will warn every few seconds that the two conflict. " +
+      "Choose \"Never show this warning\". Don't choose \"Disable IntelliSense\": clangd applies that to ALL your " +
+      "projects, turning off the C/C++ extension's IntelliSense everywhere.",
+    category: "cpp",
+    tier: "optional",
+    track: "optional",
+    views: ["cpp"],
+    detect: d.detectClangd,
+    action: { label: "Install clangd", kind: "extension", payload: "llvm-vs-code-extensions.vscode-clangd" },
   },
   {
     id: "python",
@@ -311,7 +329,7 @@ export const CHECKS: DependencyCheck[] = [
     tier: "optional",
     track: "optional",
     views: ["cpp"],
-    detect: () => d.detectExtension("ms-python.python"),
+    detect: () => d.detectOptionalExtension("ms-python.python"),
     action: { label: "Install Python", kind: "extension", payload: "ms-python.python" },
   },
   {
@@ -486,6 +504,9 @@ export interface CheckView {
   // Set only when the check is satisfied (ok) AND re-runnable — the label for the
   // small "run again" button the Onboarding row shows in that state.
   rerunLabel?: string;
+  // True when this state names its own next step (a staged check part-way done) —
+  // the row then says in words which stage it is at.
+  staged: boolean;
   isNext: boolean;
 }
 
@@ -529,8 +550,9 @@ export function buildOnboardingModel(
       tier: c.tier,
       track: c.track,
       category: c.category,
-      actionLabel: c.action?.label,
+      actionLabel: results[c.id]?.action?.label ?? c.action?.label,
       rerunLabel: c.rerun && state === "ok" ? c.rerun.label : undefined,
+      staged: results[c.id]?.action !== undefined,
       isNext: next?.id === c.id,
     };
   };
@@ -573,14 +595,16 @@ export function actionFor(id: string): GuidedAction | undefined {
  */
 export function resolveGuidedAction(
   id: string,
-  state: CheckState,
+  result: CheckResult | undefined,
 ): { action?: GuidedAction; confirm?: string } {
   const check = CHECKS.find((c) => c.id === id);
   if (!check) {
     return {};
   }
+  const state: CheckState = result?.state ?? "unknown";
   if (check.rerun && state === "ok") {
     return { action: check.rerun.action ?? check.action, confirm: check.rerun.confirm };
   }
-  return { action: check.action };
+  // A staged check's current state may name its own next step.
+  return { action: result?.action ?? check.action };
 }

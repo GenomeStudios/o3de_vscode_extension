@@ -244,6 +244,18 @@
         "title": "O3DE: Show IntelliSense Engine Mode"
       },
       {
+        "command": "o3de.showCppDataStatus",
+        "title": "O3DE: Show C++ IntelliSense Data Status"
+      },
+      {
+        "command": "o3de.showLuaReflectionStatus",
+        "title": "O3DE: Show Lua Reflection Status"
+      },
+      {
+        "command": "o3de.selectIntelliSenseEngine",
+        "title": "O3DE: Select IntelliSense Engine"
+      },
+      {
         "command": "o3de.selectGenerator",
         "title": "O3DE: Select CMake Generator"
       },

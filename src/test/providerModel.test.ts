@@ -135,7 +135,9 @@ suite("intellisense/providerModel — configuration tiers", () => {
   // ---- Tier 2 --------------------------------------------------------------
   test("tier 2: a file several targets compile gets only what those owners agree on", () => {
     const cfg = model([gameLauncher, headlessLauncher]).perFile.get(keyOf("D:/Proj/Launcher/LauncherMain.cpp"));
-    assert.deepStrictEqual(cfg!.defines, UNIVERSAL);
+    // Both launchers define LY_CMAKE_TARGET (differently), so it stays defined — the shared launcher
+    // source `#error`s without it. Only the headless launcher defines O3DE_HEADLESS_SERVER, so it goes.
+    assert.deepStrictEqual(cfg!.defines, [...UNIVERSAL, 'LY_CMAKE_TARGET="GS_Play_GameLauncher"']);
     assert.ok(!cfg!.defines.includes("O3DE_HEADLESS_SERVER=1"), "one launcher's flag must not colour the shared file");
   });
 

@@ -43,6 +43,8 @@ import { initCommandOutput } from "./build/commandOutput";
 import { generateCppProperties, refreshCppPropertiesOnStartup } from "./intellisense/generate";
 import { registerConfigurationProvider } from "./intellisense/provider";
 import { showEngineMode } from "./intellisense/engineMode";
+import { IntelliSenseStatus, showCppDataStatus, showLuaReflectionStatus } from "./intellisense/intellisenseStatus";
+import { selectIntelliSenseEngine } from "./intellisense/clangdMode";
 import { registerLuaDebug, debugLuaFile } from "./lua/debug/debugAdapter";
 import { registerLuaHandoff } from "./lua/handoff";
 import { generateLuaIntelliSense, generateLuaStubsFromDump } from "./lua/intellisense/intelliSense";
@@ -175,6 +177,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+    // clangd writes clangd.path when it downloads its server — flip the onboarding row to done.
+    if (e.affectsConfiguration("clangd.path") || e.affectsConfiguration("clangd.enable")) {
+      void deps.refresh();
+    }
     if (e.affectsConfiguration("o3de.enabled")) {
       applyEnablement(); // start/stop the runtime as the project is opted in/out
     }
@@ -423,9 +429,20 @@ export function activate(context: vscode.ExtensionContext): void {
     void generateCppProperties(buildOptions);
   });
 
-  // Command: explain how far C++ navigation reaches into the engine (dashboard IntelliSense ▸ Status).
+  // Dashboard IntelliSense ▸ Status: cached readouts + the commands that explain each row.
+  const intellisenseStatus = new IntelliSenseStatus(buildOptions, buildState, deps);
   const showEngineModeCmd = vscode.commands.registerCommand("o3de.showEngineMode", () => {
     void showEngineMode();
+  });
+  const showCppDataStatusCmd = vscode.commands.registerCommand("o3de.showCppDataStatus", () => {
+    void showCppDataStatus(intellisenseStatus);
+  });
+  const showLuaReflectionStatusCmd = vscode.commands.registerCommand("o3de.showLuaReflectionStatus", () => {
+    void showLuaReflectionStatus(intellisenseStatus);
+  });
+  // Command: choose which C++ IntelliSense engine runs (C/C++ extension or clangd) — plan I.7.
+  const selectIntelliSenseEngineCmd = vscode.commands.registerCommand("o3de.selectIntelliSenseEngine", () => {
+    void selectIntelliSenseEngine(buildOptions, context.workspaceState, intellisenseStatus);
   });
 
   // Commands: choose the CMake generator / build config (shown in the tab, persisted).
@@ -519,6 +536,7 @@ export function activate(context: vscode.ExtensionContext): void {
       onboarding,
       buildOptions,
       deps,
+      intellisenseStatus,
       context.workspaceState,
       context.extensionUri,
       context.extension.packageJSON.version as string,
@@ -528,6 +546,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // Prerequisites are detected in the background so the tree paints markers
   // without spawning processes on every render; workspace changes re-render live.
   void onboarding.refresh();
+  // An extension installed (or removed) from onboarding flips its row live — no reload needed.
+  const extensionsChanged = vscode.extensions.onDidChange(() => {
+    void deps.refresh();
+  });
   const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     onboarding.notifyChanged();
     void deps.refresh(); // project/engine presence can change with the folders
@@ -588,6 +610,7 @@ export function activate(context: vscode.ExtensionContext): void {
     enableForProject,
     disableForProject,
     foldersChanged,
+    extensionsChanged,
     helloWorld,
     showLog,
     openSettings,
@@ -606,7 +629,11 @@ export function activate(context: vscode.ExtensionContext): void {
     runDebug,
     stop,
     genCpp,
+    intellisenseStatus,
     showEngineModeCmd,
+    showCppDataStatusCmd,
+    showLuaReflectionStatusCmd,
+    selectIntelliSenseEngineCmd,
     selectGenerator,
     selectConfig,
     selectCompiler,

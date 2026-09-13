@@ -9,8 +9,12 @@
 
 import { execFile } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import type { GuidedAction } from "./registry";
+import { resolveClangdExecutable } from "./clangdServer";
+import { defaultLlvmBinDir } from "./llvm";
 import { findVisualStudioInstalls, pickBestInstall } from "../env/visualStudio";
 import { findNinja } from "../build/ninja";
 import { readManifest } from "../o3de/manifest";
@@ -24,6 +28,9 @@ export type CheckState = "ok" | "missing" | "warn" | "absent" | "unknown";
 export interface CheckResult {
   state: CheckState;
   detail?: string;
+  /** A STAGED check names its own next step for this state, overriding the check's default action
+   *  (e.g. clangd: extension installed → the next step is the server, not installing the extension). */
+  action?: GuidedAction;
 }
 
 const PROBE_TIMEOUT_MS = 6000;
@@ -65,9 +72,28 @@ export async function detectNinja(): Promise<CheckResult> {
   return found ? { state: "ok", detail: found.version } : { state: "missing" };
 }
 
-// Standalone LLVM/Clang on PATH (drives the Ninja+clang toolchain).
-export function detectClang(): Promise<CheckResult> {
-  return probe("clang", ["--version"], /clang version ([\d.]+)/i);
+// Standalone LLVM/Clang (drives the Ninja+clang toolchain, which hands CMake bare `clang`/`clang++`
+// and so finds them on PATH). Optional — like every other optional tool, absent reads grey
+// "Not installed", never red. An install in LLVM's default folder that isn't on PATH (winget's LLVM
+// package has been reported not to add itself) is found and flagged, with adding it to PATH next.
+const CLANG_VERSION = /clang version ([\d.]+)/i;
+
+export async function detectClang(): Promise<CheckResult> {
+  const onPath = await probe("clang", ["--version"], CLANG_VERSION);
+  if (onPath.state === "ok") {
+    return onPath;
+  }
+  const bin = defaultLlvmBinDir(process.env, process.platform, (file) => fs.existsSync(file));
+  if (bin) {
+    const installed = await probe(path.join(bin, "clang.exe"), ["--version"], CLANG_VERSION);
+    const version = installed.state === "ok" && installed.detail ? `${installed.detail} · ` : "";
+    return {
+      state: "warn",
+      detail: `${version}Installed · not on PATH (${bin})`,
+      action: { label: "Add LLVM to PATH", kind: "addToPath", payload: bin },
+    };
+  }
+  return { state: "absent", detail: "Not installed" };
 }
 
 // GCC — the standard Linux compiler.
@@ -186,6 +212,52 @@ export async function detectGitLfs(): Promise<CheckResult> {
 
 export function detectExtension(extensionId: string): CheckResult {
   return vscode.extensions.getExtension(extensionId) ? { state: "ok" } : { state: "missing" };
+}
+
+// An OPTIONAL extension is never a fault when absent: it reads "Not installed" on a
+// neutral dot (absent), and once installed shows its version — a visible not-done → done.
+// Required extensions keep detectExtension (missing = red, it blocks the track).
+// clangd is STAGED — two pieces, three states:
+//   extension not installed            → absent "Not installed"   (the check's Install clangd action)
+//   extension installed, no server     → warn, next step = clangd's OWN download prompt
+//   extension + working server         → ok "clangd <version>"
+// The server is found the way the clangd extension finds it (clangdServer.ts), then run once
+// with --version — a file that exists but won't start is not a working server.
+//
+// The next step is `clangd.activate`, not `clangd.install`: clangd only registers clangd.install
+// while its context is alive, and disposes it when the server wasn't found and the prompt was
+// dismissed — exactly this state. clangd.activate (always registered) re-runs clangd's startup,
+// which re-shows its own "not found … download and install clangd?" prompt.
+const CLANGD_EXTENSION = "llvm-vs-code-extensions.vscode-clangd";
+const CLANGD_SERVER_STEP: GuidedAction = { label: "Download clangd server…", kind: "command", payload: "clangd.activate" };
+
+export async function detectClangd(): Promise<CheckResult> {
+  if (!vscode.extensions.getExtension(CLANGD_EXTENSION)) {
+    return { state: "absent", detail: "Not installed" };
+  }
+  const server = resolveClangdExecutable(vscode.workspace.getConfiguration("clangd").get<string>("path") ?? "clangd", {
+    env: process.env,
+    platform: process.platform,
+    home: os.homedir(),
+    workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    exists: (file) => fs.existsSync(file) && fs.statSync(file).isFile(),
+  });
+  if (!server) {
+    return { state: "warn", detail: "Extension installed · clangd server not found", action: CLANGD_SERVER_STEP };
+  }
+  const run = await probe(server, ["--version"], /clangd version ([\d.]+)/i);
+  return run.state === "ok"
+    ? { state: "ok", detail: run.detail ? `clangd ${run.detail}` : "clangd server found" }
+    : { state: "warn", detail: "Extension installed · clangd server didn't start", action: CLANGD_SERVER_STEP };
+}
+
+export function detectOptionalExtension(extensionId: string): CheckResult {
+  const extension = vscode.extensions.getExtension(extensionId);
+  if (!extension) {
+    return { state: "absent", detail: "Not installed" };
+  }
+  const version = (extension.packageJSON as { version?: unknown } | undefined)?.version;
+  return { state: "ok", detail: typeof version === "string" ? `v${version}` : "Installed" };
 }
 
 // ---- Lua track -------------------------------------------------------------

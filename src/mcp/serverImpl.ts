@@ -10,7 +10,8 @@
 //  client echoes it (mcp-session-id header) on every later request and we route
 //  it to that session's transport. Every request must carry the bearer token.
 //  Tools: health (o3de_ping), build (o3de_build + _status/_log), run
-//  (o3de_is_running, o3de_run), and config (o3de_get/set_config, o3de_list_targets).
+//  (o3de_is_running, o3de_run), config (o3de_get/set_config, o3de_list_targets),
+//  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine).
 // ============================================================================
 
 import * as http from "http";
@@ -25,6 +26,8 @@ import { startBuildJob, getBuildJob } from "../build/buildJobs";
 import { BuildResult } from "../build/buildOutput";
 import { configSnapshot, applyConfig, listTargets } from "../build/configQuery";
 import { runStatus, launchRunTarget, forceCloseRuntime } from "../build/runQuery";
+import { intellisenseReport, setIntelliSenseEngine } from "../intellisense/intellisenseQuery";
+import type { Memento } from "vscode";
 
 const MCP_PATH = "/mcp";
 const HOST = "127.0.0.1";
@@ -46,6 +49,7 @@ export interface McpHttpOptions {
   allowForceClose: boolean; // expose the destructive o3de_force_close tool (opt-in)
   version: string;
   buildOptions: BuildOptions;
+  workspaceState: Memento; // per-workspace store (the IntelliSense engine switch records prior settings here)
 }
 
 export interface McpHttpHandle {
@@ -479,6 +483,61 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         ? `${list.targets.length} target(s) for ${list.config}`
         : list.note ?? "not configured";
       return { content: [txt(line), txt(JSON.stringify(list, null, 2))] };
+    },
+  );
+
+  // ---- IntelliSense: status + engine switch --------------------------------
+  server.registerTool(
+    "o3de_intellisense_status",
+    {
+      title: "O3DE IntelliSense Status",
+      description:
+        "Report C++ and Lua IntelliSense state for the workspace project — the same answers as the dashboard's " +
+        "IntelliSense section: which C++ IntelliSense engine is running (the Microsoft C/C++ extension, clangd, both, " +
+        "or none) and whether a window reload is still needed to stop the C/C++ extension; whether the C/C++ and " +
+        "clangd extensions are installed (with versions, and whether clangd's language server has been downloaded); " +
+        "how far navigation reaches into engine code (engineSources: native / redirected / headersOnly / unresolved); " +
+        "whether C++ data is stale and needs a reconfigure (cppData); and whether Lua reflection is stale (luaReflection).",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => {
+      const report = await intellisenseReport(opts.buildOptions);
+      const line =
+        `Engine: ${report.engine.label}${report.engine.cppToolsStopsAfterReload ? " (reload pending)" : ""} · ` +
+        `C/C++ ${report.extensions.cppTools.installed ? "installed" : "not installed"} · ` +
+        `clangd ${report.extensions.clangd.installed ? (report.extensions.clangd.server.found ? "installed" : "installed, server not found") : "not installed"} · ` +
+        `Engine sources: ${report.engineSources.label} · C++ data: ${report.cppData.label} · Lua: ${report.luaReflection.label}`;
+      return { content: [txt(line), txt(JSON.stringify(report, null, 2))] };
+    },
+  );
+
+  server.registerTool(
+    "o3de_set_intellisense_engine",
+    {
+      title: "O3DE Set IntelliSense Engine",
+      description:
+        "Choose which C++ IntelliSense engine runs for this workspace — 'cpptools' (the Microsoft C/C++ extension) or " +
+        "'clangd' — and switch the other off. Same as clicking IntelliSense Engine on the dashboard. 'clangd' first " +
+        "generates O3DE's compile database from the project's CMake configure (the project must be configured), turns " +
+        "C/C++ IntelliSense off and clangd on, and restarts clangd. 'cpptools' restores the settings O3DE changed and " +
+        "shuts clangd down. Writes WORKSPACE settings only and is reversible. Never installs an extension: a missing one " +
+        "returns reason notInstalled (check o3de_intellisense_status first). When the result has reloadRequired:true, " +
+        "tell the user to reload the window — the C/C++ extension only stops its IntelliSense after a reload. If " +
+        "clangd's language server hasn't been downloaded yet, clangd asks the user to download it.",
+      inputSchema: {
+        engine: z.enum(["cpptools", "clangd"]).describe("'cpptools' = Microsoft C/C++ extension; 'clangd' = clangd."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: { engine: "cpptools" | "clangd" }) => {
+      const result = await setIntelliSenseEngine(opts.buildOptions, opts.workspaceState, args.engine);
+      const line = !result.ok
+        ? `Not switched (${result.reason}): ${result.message}`
+        : `IntelliSense engine set to ${result.engine}; running now: ${result.running}.` +
+          (result.database ? ` Compile database: ${result.database.entries} entries (${result.database.engineEntries} engine).` : "") +
+          (result.reloadRequired ? " Reload the window to stop the C/C++ extension's IntelliSense." : "");
+      return { content: [txt(line), txt(JSON.stringify(result, null, 2))], isError: !result.ok };
     },
   );
 

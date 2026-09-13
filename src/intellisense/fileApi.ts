@@ -52,7 +52,12 @@ interface IndexJson {
   objects?: { kind: string; jsonFile: string }[];
 }
 interface CodemodelJson {
+  paths?: { source?: string; build?: string };
   configurations?: { name: string; targets?: { name: string; jsonFile: string }[] }[];
+}
+interface CMakeFilesJson {
+  paths?: { source?: string; build?: string };
+  inputs?: { path: string; isGenerated?: boolean; isExternal?: boolean; isCMake?: boolean }[];
 }
 interface ToolchainsJson {
   toolchains?: { language?: string; compiler?: { path?: string } }[];
@@ -63,13 +68,38 @@ interface CompileGroup {
   defines?: { define: string }[];
   compileCommandFragments?: { fragment: string; role?: string }[];
   languageStandard?: { standard?: string };
+  sourceIndexes?: number[];
 }
 interface TargetJson {
   name?: string;
   type?: string; // EXECUTABLE | STATIC_LIBRARY | MODULE_LIBRARY | UTILITY | …
   artifacts?: { path: string }[];
   compileGroups?: CompileGroup[];
-  sources?: { path: string }[];
+  sources?: { path: string; compileGroupIndex?: number }[];
+}
+
+// ---- Command-level shapes (compile_commands.json synthesis) ----------------
+/** One compile group kept whole — the provider merges groups, a compile command must not. */
+export interface CommandGroup {
+  language: string; // "CXX" | "C" | "RC" | …
+  fragments: string[]; // raw compileCommandFragments, in order
+  includes: IncludeEntry[];
+  defines: string[];
+  sourceIndexes: number[];
+}
+
+export interface CommandTarget {
+  name: string;
+  groups: CommandGroup[];
+  sources: { path: string; groupIndex?: number }[]; // every listed source, code or not
+  compile: TargetCompile; // the provider's merged view (parseTarget) — engine entries agree on it exactly
+}
+
+export interface CommandReply {
+  sourceDir: string;
+  buildDir: string;
+  compilerPath?: string;
+  targets: CommandTarget[]; // compiling targets only
 }
 
 // ---- Pure parsers ----------------------------------------------------------
@@ -141,6 +171,66 @@ export function parseExecutableTarget(json: TargetJson): ExecutableTarget | unde
     return undefined;
   }
   return { name: json.name, artifact: json.artifacts?.[0]?.path };
+}
+
+/**
+ * The CMake inputs whose change makes IntelliSense data stale: the files that DEFINE targets,
+ * source lists and enabled gems — `CMakeLists.txt`, `*.cmake` (incl. `*_files.cmake`) and
+ * `project.json`. CMake's own modules and generated files are skipped.
+ *
+ * `gem.json` and the o3de manifest are deliberately NOT watched. Measured on gs_play, 18 gem.json
+ * files were rewritten in one 88 ms batch and the manifest is rewritten by O3DE tooling, with no
+ * change to targets — watching them made a verified-working project read "stale".
+ */
+const TARGET_DEFINING_INPUT = /(^|[\\/])CMakeLists\.txt$|\.cmake$|(^|[\\/])project\.json$/i;
+
+export function parseTargetDefiningInputs(json: CMakeFilesJson): string[] {
+  const source = json.paths?.source ?? "";
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const input of json.inputs ?? []) {
+    if (input.isCMake || input.isGenerated || !TARGET_DEFINING_INPUT.test(input.path)) {
+      continue;
+    }
+    const abs = path.isAbsolute(input.path) ? input.path : path.join(source, input.path);
+    const key = abs.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(abs);
+    }
+  }
+  return out;
+}
+
+const MODULE_TYPES = new Set(["MODULE_LIBRARY", "SHARED_LIBRARY"]);
+const MODULE_BINARY = /\.(dll|so|dylib)$/i;
+
+/** A module/shared target's library binaries (absolute) — what the Editor loads and reflects from.
+ *  Taken from the target's own artifacts, so engine / 3rd-party DLLs copied into bin/ never count. */
+export function parseModuleArtifacts(json: TargetJson, buildDir: string): string[] {
+  if (!json.type || !MODULE_TYPES.has(json.type)) {
+    return [];
+  }
+  return (json.artifacts ?? [])
+    .map((artifact) => artifact.path)
+    .filter((artifactPath) => MODULE_BINARY.test(artifactPath))
+    .map((artifactPath) => (path.isAbsolute(artifactPath) ? artifactPath : path.join(buildDir, artifactPath)));
+}
+
+/** A target's compile groups and sources, kept at command granularity. */
+export function parseCommandTarget(json: TargetJson): CommandTarget {
+  return {
+    name: json.name ?? "",
+    groups: (json.compileGroups ?? []).map((group) => ({
+      language: group.language ?? "",
+      fragments: (group.compileCommandFragments ?? []).map((fragment) => fragment.fragment),
+      includes: (group.includes ?? []).map((include) => ({ path: include.path, isSystem: include.isSystem })),
+      defines: (group.defines ?? []).map((define) => define.define),
+      sourceIndexes: group.sourceIndexes ?? [],
+    })),
+    sources: (json.sources ?? []).map((source) => ({ path: source.path, groupIndex: source.compileGroupIndex })),
+    compile: parseTarget(json),
+  };
 }
 
 /** The CXX compiler path (cl.exe) from the toolchains reply. */
@@ -287,4 +377,65 @@ export function loadExecutableTargets(replyDir: string, configName: string): Exe
     }
   }
   return out;
+}
+
+// ---- Freshness inputs --------------------------------------------------------
+/** When the newest reply was written (ms), i.e. the last configure — undefined when never configured. */
+export function replyTimestamp(replyDir: string): number | undefined {
+  try {
+    const indexFile = latestIndexFile(replyDir);
+    return indexFile ? fs.statSync(indexFile).mtimeMs : undefined;
+  } catch {
+    return undefined; // no reply directory
+  }
+}
+
+/** Target-defining CMake inputs for the newest reply; undefined when the reply has no cmakeFiles
+ *  object (a configure from before the query asked for it — freshness is then unknowable). */
+export function loadTargetDefiningInputs(replyDir: string): string[] | undefined {
+  const indexFile = latestIndexFile(replyDir);
+  const name = indexFile ? readJson<IndexJson>(indexFile)?.objects?.find((o) => o.kind === "cmakeFiles")?.jsonFile : undefined;
+  const json = name ? readJson<CMakeFilesJson>(path.join(replyDir, name)) : undefined;
+  return json ? parseTargetDefiningInputs(json) : undefined;
+}
+
+/** Compiling targets at command granularity, plus the dirs and compiler a compile command needs. */
+export function loadCommandReply(replyDir: string, configName: string): CommandReply | undefined {
+  const indexFile = latestIndexFile(replyDir);
+  const objects = indexFile ? (readJson<IndexJson>(indexFile)?.objects ?? []) : [];
+  const codemodelName = objects.find((o) => o.kind === "codemodel")?.jsonFile;
+  const toolchainsName = objects.find((o) => o.kind === "toolchains")?.jsonFile;
+  const codemodel = codemodelName ? readJson<CodemodelJson>(path.join(replyDir, codemodelName)) : undefined;
+  const config = codemodel ? pickConfiguration(codemodel, configName) : undefined;
+  if (!codemodel || !config) {
+    return undefined;
+  }
+  const targets = config.targets
+    .map((target) => readJson<TargetJson>(path.join(replyDir, target.jsonFile)))
+    .filter((json): json is TargetJson => json !== undefined && (json.compileGroups ?? []).length > 0)
+    .map(parseCommandTarget);
+  return {
+    sourceDir: codemodel.paths?.source ?? "",
+    buildDir: codemodel.paths?.build ?? "",
+    compilerPath: toolchainsName
+      ? parseCompilerPath(readJson<ToolchainsJson>(path.join(replyDir, toolchainsName)) ?? {})
+      : undefined,
+    targets,
+  };
+}
+
+/** Every module/shared library binary this build produces for `configName` (absolute paths). */
+export function loadModuleArtifacts(replyDir: string, configName: string): string[] {
+  const indexFile = latestIndexFile(replyDir);
+  const codemodelName = indexFile ? readJson<IndexJson>(indexFile)?.objects?.find((o) => o.kind === "codemodel")?.jsonFile : undefined;
+  const codemodel = codemodelName ? readJson<CodemodelJson>(path.join(replyDir, codemodelName)) : undefined;
+  const config = codemodel ? pickConfiguration(codemodel, configName) : undefined;
+  if (!codemodel || !config) {
+    return [];
+  }
+  const buildDir = codemodel.paths?.build ?? "";
+  return config.targets.flatMap((target) => {
+    const json = readJson<TargetJson>(path.join(replyDir, target.jsonFile));
+    return json ? parseModuleArtifacts(json, buildDir) : [];
+  });
 }

@@ -13,7 +13,10 @@ import * as path from "path";
 export interface O3deProject {
   projectName: string;
   displayName?: string;
-  engine?: string; // engine NAME — resolve to a path via the manifest
+  engine?: string; // engine NAME (legacy record) — project.json, overridden by user/project.json
+  /** The DIRECT engine record: `engine_path` in <project>/user/project.json. Path-dominant — O3DE's own
+   *  resolver returns it before considering the name (scripts/o3de/o3de/compatibility.py). */
+  enginePath?: string;
   externalSubdirectories: string[]; // own gem(s), relative to the project root
   gemNames: string[];
   path: string;
@@ -49,14 +52,26 @@ function asStringArray(value: unknown): string[] {
 }
 
 // ---- Pure parsers (JSON object → typed record) -----------------------------
-export function parseProject(json: Record<string, unknown>, dir: string): O3deProject | undefined {
+/**
+ * Parse project.json, with the per-user `<project>/user/project.json` (`user`) merged over it the way O3DE merges
+ * them: its `engine` overrides the name, and its `engine_path` is the direct engine record. A relative
+ * `engine_path` is taken relative to the project folder.
+ */
+export function parseProject(
+  json: Record<string, unknown>,
+  dir: string,
+  user?: Record<string, unknown>,
+): O3deProject | undefined {
   if (typeof json.project_name !== "string") {
     return undefined;
   }
+  const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim() ? value : undefined);
+  const userEnginePath = text(user?.engine_path);
   return {
     projectName: json.project_name,
     displayName: typeof json.display_name === "string" ? json.display_name : undefined,
-    engine: typeof json.engine === "string" ? json.engine : undefined,
+    engine: text(user?.engine) ?? text(json.engine),
+    enginePath: userEnginePath && !path.isAbsolute(userEnginePath) ? path.join(dir, userEnginePath) : userEnginePath,
     externalSubdirectories: asStringArray(json.external_subdirectories),
     gemNames: asStringArray(json.gem_names),
     path: dir,
@@ -92,7 +107,12 @@ export function parseGem(json: Record<string, unknown>, dir: string): O3deGem | 
 // ---- Disk readers (folder → typed record, or undefined) --------------------
 export function readProject(dir: string): O3deProject | undefined {
   const json = readJsonFile(path.join(dir, "project.json"));
-  return json ? parseProject(json as Record<string, unknown>, dir) : undefined;
+  if (!json) {
+    return undefined;
+  }
+  const user = readJsonFile(path.join(dir, "user", "project.json")); // per-user overrides; absent on legacy/new checkouts
+  const userRecord = user && typeof user === "object" && !Array.isArray(user) ? (user as Record<string, unknown>) : undefined;
+  return parseProject(json as Record<string, unknown>, dir, userRecord);
 }
 
 export function readEngine(dir: string): O3deEngine | undefined {

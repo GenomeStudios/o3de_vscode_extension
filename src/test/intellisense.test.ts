@@ -154,12 +154,22 @@ suite("intellisense/consolidate.agreedCompile (union includes, intersect semanti
     standard: "20",
   };
 
-  test("defines are the INTERSECTION — only what every target agrees on", () => {
-    assert.deepStrictEqual(agreedCompile([gem, headless]).defines, ["AZ_PROFILE_BUILD", "WIN64"]);
+  test("defines: only macros EVERY target defines survive", () => {
+    assert.deepStrictEqual(agreedCompile([gem, headless]).defines, ["AZ_PROFILE_BUILD", "WIN64", "O3DE_GEM_NAME=GS_Core"]);
   });
 
-  test("a macro with conflicting values drops out entirely rather than picking one", () => {
-    assert.ok(!agreedCompile([gem, headless]).defines.some((d) => d.startsWith("O3DE_GEM_NAME")));
+  test("a macro every target defines with DIFFERENT values is kept once, with the smallest value", () => {
+    // Regression: gs_play's four launchers each define LY_CMAKE_TARGET differently. Matching by exact
+    // text dropped it, and their shared LauncherProject.cpp hit `#error "LY_CMAKE_TARGET must be defined"`.
+    const launchers = ["GS_Play_UnifiedLauncher", "GS_Play_GameLauncher", "GS_Play_ServerLauncher", "GS_Play_HeadlessServerLauncher"].map(
+      (name) => ({ includes: [], defines: ["AZ_PROFILE_BUILD", `LY_CMAKE_TARGET="${name}"`], forcedIncludes: [] }),
+    );
+    const defines = agreedCompile(launchers).defines;
+    assert.deepStrictEqual(defines.filter((d) => d.startsWith("LY_CMAKE_TARGET")), ['LY_CMAKE_TARGET="GS_Play_GameLauncher"']);
+  });
+
+  test("a macro only SOME targets define is dropped", () => {
+    assert.ok(!agreedCompile([gem, headless]).defines.includes("GS_Core_EXPORTS"));
   });
 
   test("a one-target flag like O3DE_HEADLESS_SERVER=1 never leaks into shared files", () => {

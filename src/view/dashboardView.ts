@@ -31,7 +31,10 @@ import { launchArgsLabel } from "../build/runCommand";
 import { DependencyStatus } from "../deps/dependencyStatus";
 import { buildOnboardingModel, resolveGuidedAction, View } from "../deps/registry";
 import { runGuidedAction } from "../deps/actions";
-import { EngineModeReport, engineModeDetail, engineModeLabel, workspaceEngineMode } from "../intellisense/engineMode";
+import { engineModeDetail, engineModeLabel } from "../intellisense/engineMode";
+import { cppFreshnessDetail, cppFreshnessLabel, luaFreshnessDetail, luaFreshnessLabel } from "../intellisense/freshness";
+import { IntelliSenseSnapshot, IntelliSenseStatus } from "../intellisense/intellisenseStatus";
+import { runningEngineDetail, runningEngineLabel } from "../intellisense/intellisenseEngine";
 import { loadIcon } from "./svgAssets";
 import { getNonce } from "./webviewUtil";
 
@@ -60,6 +63,9 @@ const COMMANDS: Record<string, string> = {
   configureProject: "o3de.configureProject",
   generateCppProperties: "o3de.generateCppProperties",
   showEngineMode: "o3de.showEngineMode",
+  showCppDataStatus: "o3de.showCppDataStatus",
+  showLuaReflectionStatus: "o3de.showLuaReflectionStatus",
+  selectIntelliSenseEngine: "o3de.selectIntelliSenseEngine",
   classWizard: "o3de.classWizard",
   selectRunTarget: "o3de.selectRunTarget",
   setLaunchArgs: "o3de.setLaunchArgs",
@@ -90,7 +96,7 @@ function configPayload(
   options: BuildOptions,
   onboarding: OnboardingStatus,
   activity: ActivitySnapshot,
-  engineMode: EngineModeReport,
+  intellisense: IntelliSenseSnapshot, // cached — never computed per render (renders fire on every progress tick)
 ) {
   // Configure is a config ROW rather than a button, but it still TOGGLES: while a
   // configure runs the row becomes its own Stop control (the progress itself is on
@@ -149,10 +155,29 @@ function configPayload(
         title: "Status",
         rows: [
           {
+            // Which C++ engine is running; click to choose which runs and which doesn't.
+            label: "IntelliSense Engine",
+            value: runningEngineLabel(intellisense.activeEngine.running),
+            tip: runningEngineDetail(intellisense.activeEngine.running, intellisense.activeEngine.inputs),
+            cmd: "selectIntelliSenseEngine",
+          },
+          {
             label: "Engine Sources",
-            value: engineModeLabel(engineMode),
-            tip: engineModeDetail(engineMode),
+            value: engineModeLabel(intellisense.engine),
+            tip: engineModeDetail(intellisense.engine),
             cmd: "showEngineMode",
+          },
+          {
+            label: "C++ Data",
+            value: cppFreshnessLabel(intellisense.cpp),
+            tip: cppFreshnessDetail(intellisense.cpp),
+            cmd: "showCppDataStatus",
+          },
+          {
+            label: "Lua Reflection",
+            value: luaFreshnessLabel(intellisense.lua),
+            tip: luaFreshnessDetail(intellisense.lua),
+            cmd: "showLuaReflectionStatus",
           },
         ],
       },
@@ -180,6 +205,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     private readonly onboarding: OnboardingStatus,
     private readonly options: BuildOptions,
     private readonly deps: DependencyStatus,
+    private readonly intellisense: IntelliSenseStatus, // IntelliSense ▸ Status readouts (cached)
     // Section collapse state persists here so it survives full VS Code restarts.
     private readonly memento: vscode.Memento,
     private readonly extensionUri: vscode.Uri, // for media/icons/*.svg
@@ -194,8 +220,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   // declares a re-run, resolveGuidedAction returns its re-run action + (optional)
   // confirmation, which we surface as a modal before firing.
   private async runAction(id: string): Promise<void> {
-    const state = this.deps.resultMap[id]?.state ?? "unknown";
-    const { action, confirm } = resolveGuidedAction(id, state);
+    const { action, confirm } = resolveGuidedAction(id, this.deps.resultMap[id]); // the result: staged checks carry their next step
     if (!action) {
       return;
     }
@@ -247,7 +272,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const postConfig = (): void =>
       void webview.postMessage({
         type: "config",
-        ...configPayload(this.options, this.onboarding, this.buildState.activity, workspaceEngineMode()),
+        ...configPayload(this.options, this.onboarding, this.buildState.activity, this.intellisense.current),
       });
     const postDeps = (): void =>
       void webview.postMessage({ type: "deps", model: buildOnboardingModel(this.deps.resultMap, this.deps.view) });
@@ -266,8 +291,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       this.deps.onDidChange(() => {
         postStatus(); // the header C++/Lua readouts derive from deps
         postDeps();
-        postConfig(); // IntelliSense ▸ Engine Sources tracks the workspace's engines (a re-scan follows folder changes)
       }),
+      // IntelliSense ▸ Status recomputes on its own triggers (re-scan, folders, job end, reply/dump writes).
+      this.intellisense.onDidChange(() => postConfig()),
       // Re-detect whenever the panel is revealed — catches changes made outside
       // the extension (enabling a gem, generating a dump via the live Editor).
       webviewView.onDidChangeVisibility(() => {
@@ -297,7 +323,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       running: this.runState.isRunning,
       activity: this.buildState.activity,
       status: statusPayload(this.deps),
-      config: configPayload(this.options, this.onboarding, this.buildState.activity, workspaceEngineMode()),
+      config: configPayload(this.options, this.onboarding, this.buildState.activity, this.intellisense.current),
       deps: buildOnboardingModel(this.deps.resultMap, this.deps.view),
       collapse: this.getCollapse(),
     });
@@ -777,9 +803,14 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           b.title = 'Run this step again';
           b.onclick = () => sendAction(v.id); row.appendChild(b);
         }
-      } else if (v.actionLabel && (v.state === 'missing' || v.state === 'warn' || v.state === 'absent' || v.state === 'unknown')) {
-        const b = document.createElement('button'); b.className = 'fixbtn small'; b.textContent = v.actionLabel;
-        b.onclick = () => sendAction(v.id); row.appendChild(b);
+      } else {
+        // Absent (an optional piece you don't have) and staged (part-way done) rows say where they are in words —
+        // "Not installed", "Extension installed · clangd server not found" — not just a dot colour.
+        if ((v.state === 'absent' || v.staged) && v.detail) { const d = document.createElement('span'); d.className = 'ddetail'; d.textContent = v.detail; row.appendChild(d); }
+        if (v.actionLabel && (v.state === 'missing' || v.state === 'warn' || v.state === 'absent' || v.state === 'unknown')) {
+          const b = document.createElement('button'); b.className = 'fixbtn small'; b.textContent = v.actionLabel;
+          b.onclick = () => sendAction(v.id); row.appendChild(b);
+        }
       }
       return row;
     }

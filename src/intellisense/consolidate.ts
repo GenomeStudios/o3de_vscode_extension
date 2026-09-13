@@ -78,28 +78,70 @@ function intersectAll(lists: string[][], key: (value: string) => string): string
   return out;
 }
 
+/** A define's macro name: `FOO=1` → `FOO`, `BAR(x)=x` → `BAR`. */
+const macroName = (define: string): string => (define.match(/^[^=(]*/)?.[0] ?? define).trim();
+
+/**
+ * Macros EVERY target defines, matched by NAME. A macro some target does not define at
+ * all is dropped. When every target defines it but the values differ, it is still
+ * defined in every build — so it is KEPT, with the lexically smallest definition
+ * (deterministic, and independent of target order).
+ *
+ * Matching by exact text was wrong: gs_play's four launchers all define
+ * LY_CMAKE_TARGET, each with its own value, so exact-text matching dropped it — and the
+ * file they share hits `#error "LY_CMAKE_TARGET must be defined"` (caught by compiling
+ * the synthesized clangd command with real MSVC). Its value is used as a string, so it
+ * must keep a real value, not a bare define.
+ */
+function agreedDefines(lists: string[][]): string[] {
+  if (lists.length === 0) {
+    return [];
+  }
+  // Per target: macro name → its lexically smallest definition.
+  const perTarget = lists.map((list) => {
+    const byName = new Map<string, string>();
+    for (const define of list) {
+      const name = macroName(define);
+      const current = byName.get(name);
+      if (current === undefined || define < current) {
+        byName.set(name, define);
+      }
+    }
+    return byName;
+  });
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const define of lists[0]) {
+    const name = macroName(define);
+    if (seen.has(name) || !perTarget.every((byName) => byName.has(name))) {
+      continue;
+    }
+    seen.add(name);
+    out.push(perTarget.map((byName) => byName.get(name) as string).sort()[0]);
+  }
+  return out;
+}
+
 /**
  * What a file compiles with when no SINGLE target owns it — engine source reached
  * through the source-engine redirect, a gem not enabled in this project, or a file
  * several targets share. One rule, "union includes, intersect semantics":
  *
  *   - Include paths: the UNION. A header any target can reach should still resolve.
- *   - Defines + forced includes: the INTERSECTION. Only what EVERY target agrees on.
+ *   - Defines: only macros EVERY target defines (by name — see agreedDefines).
+ *   - Forced includes: the INTERSECTION.
  *
  * A union of defines is self-contradictory on a real project — measured on gs_play it
  * carried 14 different `O3DE_GEM_NAME=` values at once and `O3DE_HEADLESS_SERVER=1`,
- * which greys out client code as inactive in every file that falls back. An
- * intersection cannot contradict itself, and it is order-independent, so the result is
- * deterministic across refreshes by construction.
+ * which greys out client code as inactive in every file that falls back. Keeping only
+ * what every target defines, with one value per macro, cannot contradict itself, and it
+ * is order-independent, so the result is deterministic across refreshes by construction.
  */
 export function agreedCompile(targets: TargetCompile[]): ConsolidatedCompile {
   const union = consolidateTargets(targets);
   return {
     includes: union.includes,
-    defines: intersectAll(
-      targets.map((target) => target.defines),
-      (define) => define, // exact text: FOO=1 and FOO=2 are different, so a conflict drops out
-    ),
+    defines: agreedDefines(targets.map((target) => target.defines)),
     forcedIncludes: intersectAll(
       targets.map((target) => target.forcedIncludes.map(normalizePath)),
       (forced) => forced.toLowerCase(),

@@ -122,7 +122,13 @@ function loneWorkspaceSourceEngine(): O3deEngine | undefined {
 
 /**
  * Resolve the engine a project targets. In order:
- *   1. an engine DIRECTORY whose engine.json declares project.json's `engine` name
+ *   0. PATH-DOMINANT: `engine_path` from <project>/user/project.json — the direct record O3DE's own
+ *      resolver returns before looking at any name (compatibility.py), and the way engine ownership is
+ *      recorded going forward. Used when it holds a readable engine.json; a stale path (engine moved or
+ *      deleted) falls through to the legacy chain rather than failing outright.
+ *   Legacy records — a name only, which stops being unique as soon as two engines share it (two "o3de"
+ *   engines resolved a project to the wrong one):
+ *   1. an engine DIRECTORY whose engine.json declares the project's `engine` name
  *      (workspace folders before manifest `engines` roots),
  *   2. the workspace's own source engine, whatever it calls itself — the user
  *      pointed the workspace at it, so a name mismatch shouldn't block us,
@@ -130,6 +136,13 @@ function loneWorkspaceSourceEngine(): O3deEngine | undefined {
  *      engine appears there and nowhere else.
  */
 export function resolveProjectEngine(project: O3deProject): O3deEngine | undefined {
+  if (project.enginePath) {
+    const direct = readEngine(project.enginePath);
+    if (direct) {
+      return direct;
+    }
+  }
+
   const wanted = project.engine?.toLowerCase();
 
   if (wanted) {

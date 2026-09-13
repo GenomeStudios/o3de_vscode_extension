@@ -25,15 +25,98 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Engine Mode**). When the mode is *Headers only* and a source engine is registered on your
   machine, the message offers **Set Up Workspace…** to add it; when none is registered, no remedy
   is offered, because there isn't one.
+- **IntelliSense ▸ Status ▸ C++ Data** tells you whether C++ IntelliSense still matches your CMake
+  project. It reads **Stale (reconfigure)** when a file that defines targets or source lists —
+  `CMakeLists.txt`, any `*.cmake` such as a gem's `*_files.cmake`, or `project.json` — changed after
+  the last configure, so a file you just added won't have correct IntelliSense until you
+  reconfigure; the message names the files. **Not configured** means the extension's Configure
+  hasn't run for this project yet, so the live C++ IntelliSense provider has nothing to serve.
+  `gem.json` edits and the O3DE manifest are deliberately ignored: they are often rewritten in bulk
+  without changing any build target, and counting them flagged working projects as stale.
+- **IntelliSense ▸ Status ▸ Lua Reflection** tells you whether Lua completions still reflect your
+  code. It reads **Stale (gems rebuilt)** when any of this build's modules — what the Editor
+  reflects the scripting API from — were rebuilt after the last Lua IntelliSense generation, and
+  **Stale (different engine)** when the reflection was captured from another engine than the one
+  the project builds against now. Only modules this build produces count; engine and third-party
+  DLLs copied into `bin/` do not.
+
+  Click either row for details and the fix (**Configure Project** or **Generate Lua
+  IntelliSense**), or use **O3DE: Show C++ IntelliSense Data Status** / **O3DE: Show Lua Reflection
+  Status**. The rows update when a configure or build finishes, when IntelliSense data is
+  regenerated, and when the panel is shown — not on every build progress tick, so the dashboard
+  stays responsive during builds.
+- **clangd extension** in Setup & Onboarding's C++ optionals, next to CMake Tools. It is optional
+  and never blocks setup. clangd comes in two pieces — the extension, and the clangd language server
+  it downloads — so the row shows which stage you're at:
+  - **Not installed** → **Install clangd** installs the extension.
+  - **Extension installed · clangd server not found** (a yellow dot) — the extension is there but its
+    server was never downloaded, for example because its download prompt was dismissed or never seen.
+    **Download clangd server…** brings back clangd's own download prompt.
+  - **clangd *version*** — both pieces present, and the server actually runs.
+
+  The row updates as soon as clangd finishes downloading. Which engine actually runs is chosen on
+  **IntelliSense ▸ Status ▸ IntelliSense Engine** (below).
+
+  **When O3DE Development Tools installs clangd,** it also records clangd's own **Never show this
+  warning** choice, so clangd's repeating "conflicts with the C/C++ extension" warning doesn't appear.
+  **If you installed clangd some other way,** that warning shows every few seconds and dismissing it
+  only brings it back. Choose **Never show this warning**. Do **not** choose **Disable
+  IntelliSense** — clangd writes that to your user settings, which turns off the C/C++ extension's
+  IntelliSense in *every* project. If that already happened, remove
+  `"C_Cpp.intelliSenseEngine": "disabled"` from your user settings.
+- **IntelliSense ▸ Status ▸ IntelliSense Engine** shows which C++ IntelliSense engine is running in
+  this workspace: **C/C++ IntelliSense** (the Microsoft C/C++ extension), **clangd IntelliSense**,
+  **Both running (conflict)** or **None running**. It reads your settings as they are — nothing is
+  changed until you choose. Click it (or run **O3DE: Select IntelliSense Engine**) to choose which
+  engine runs and which does not; an engine whose extension isn't installed is installed first.
+  - **clangd** — generates a compile database for clangd from the project's CMake configure:
+    every project source with its real flags, plus, for a project that builds against a prebuilt SDK
+    engine with a source engine in the workspace, that engine's Framework sources, so clangd indexes
+    engine code too. It then turns the C/C++ extension's IntelliSense off and clangd on, points clangd
+    at the database, and restarts clangd. Reload the window when asked: the C/C++ extension only
+    stops its IntelliSense after a reload. It still handles debugging. A clangd whose language server
+    hasn't been downloaded yet shows its own download prompt at this point.
+  - **C/C++** — puts back the settings O3DE changed, switches clangd off, and shuts it down.
+
+  Every change is a **workspace** setting — never your user settings — and switching back restores
+  the values the workspace had before O3DE changed them. The project must be configured first;
+  if it isn't, the switch offers **Configure Project**.
+- **MCP IntelliSense tools** — the LLM/MCP endpoint gains two tools:
+  - **`o3de_intellisense_status`** (read-only) returns what the dashboard's IntelliSense section
+    shows:
+    - which C++ IntelliSense engine is running, and whether a window reload is still needed to stop
+      the C/C++ extension;
+    - whether the C/C++ and clangd extensions are installed, with versions, and whether clangd's
+      language server has been downloaded;
+    - the Engine Sources, C++ Data and Lua Reflection status.
+  - **`o3de_set_intellisense_engine`** (`cpptools` or `clangd`) switches the engine exactly as the
+    dashboard does. It reports the result as data instead of showing prompts: settings changed,
+    compile database entries, and `reloadRequired`. It never installs an extension; a missing one
+    is reported as `notInstalled`.
 
 ### Changed
 
 - **Generate C++ IntelliSense** and **Generate Lua IntelliSense** moved from the C++ and Lua
   sections into the new IntelliSense section. The Lua section's now-empty *Configuration* group is
   gone. The commands themselves, and the Setup & Onboarding checklist, are unchanged.
+- **Optional extensions read "Not installed" instead of showing a red fault.** CMake Tools,
+  Python and clangd are optional, so when they are absent their row shows a neutral dot and the
+  words *Not installed*; once installed it shows the installed version. Installing or removing
+  an extension now updates Setup & Onboarding immediately, without reloading the window.
+  Required extensions (C/C++, Lua) still show red when missing.
 
 ### Fixed
 
+- **The project's engine is taken from its direct engine path first.** O3DE records the exact engine
+  a project uses as `engine_path` in `<project>/user/project.json`, and O3DE's own tools read it
+  before anything else. The extension only looked at the engine *name* in `project.json` — which stops
+  being unique once two registered engines share a name (for example two engines both called `o3de`),
+  so a project could resolve to the wrong engine. `engine_path` now wins whenever it points at a valid
+  engine; an `engine` entry in `user/project.json` overrides the name the same way O3DE merges the two;
+  and projects without a `user/project.json`, or whose recorded path no longer exists, still resolve by
+  name as before. This affects everything that uses the project's engine: Run / Run in Debug,
+  launch.json generation, the Class Creation Wizard, Lua and C++ IntelliSense, and the environment
+  report, which now also shows the recorded engine path and where the engine resolved to.
 - **Go to Definition now reaches your source engine in hand-built workspaces.** When a
   project builds against a prebuilt SDK engine, the extension redirects engine include paths
   to a source engine you keep in the workspace, so F12 lands on real `.cpp` files instead of
@@ -68,6 +151,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   only lists headers without compiling anything (such as a gem's `.API` target) could overwrite
   those headers' configuration with an empty one, leaving every `#include` in them unresolved.
   Only targets that actually compile now decide a file's configuration.
+- **Installing an extension from Setup & Onboarding uses your editor's own marketplace.** The
+  install always ran through the editor's built-in extension marketplace, but when it failed the
+  fallback opened the Visual Studio Marketplace — the wrong store for VSCodium and other
+  VS Code-based editors, which use Open VSX. The fallback now opens the extension's page on the
+  marketplace your editor is actually configured with (read from the editor's own settings, and
+  honouring `VSCODE_GALLERY_ITEM_URL`), and the install message names that marketplace.
+- **The optional Clang / LLVM row no longer shows red when Clang isn't installed.** It was the only
+  optional tool that did; it now reads **Not installed** on a neutral dot, like the rest. It also
+  recognises an LLVM install in its default folder (`C:\Program Files\LLVM\bin`) that isn't on your
+  PATH — winget's LLVM package has been reported not to add itself — which the Clang + Ninja build
+  can't use, because it looks `clang` up on PATH. That row reads **Installed · not on PATH** with an
+  **Add LLVM to PATH** button, which adds the folder to your *user* PATH (no administrator rights; an
+  existing entry is left alone). Quit and reopen the editor afterwards so builds can find clang.
+  Note: *Clang / LLVM* is the compiler, used only if you build with Clang; the *clangd* row is the
+  language server for IntelliSense. They are separate installs, and neither provides the other.
 
 ## [0.2.3] — 2026-09-02
 

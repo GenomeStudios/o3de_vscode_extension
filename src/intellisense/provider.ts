@@ -23,40 +23,16 @@ import { log } from "../log";
 import { readProject } from "../o3de/identity";
 import { BuildOptions } from "../build/buildOptions";
 import { fileApiReplyDir } from "../build/configureCommand";
-import { sourceEngineFolder } from "../build/workspaceFolders";
 import { EXTENSION_ID } from "../constants";
 import { loadFileApiReply } from "./fileApi";
 import { buildProviderModel, ProviderModel } from "./providerModel";
 import { intelliSenseModeFor } from "./cppProperties";
-import { detectBuildEngineRoot } from "./engineRoot";
+import { absoluteEngineMappings } from "./engineMappings";
 import { detectEngineMode, engineModeDetail } from "./engineMode";
-import { RootMapping } from "./remap";
 import { normalizePath, uniqueStable } from "./paths";
 
 const CODE_SOURCE = /\.(c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx|inl|ipp|tpp)$/i;
 
-// Engine build → source engine, as an ABSOLUTE path (provider responses aren't ${var}-resolved).
-function buildAbsoluteMappings(
-  project: ReturnType<typeof readProject>,
-  includePaths: string[],
-): RootMapping[] {
-  if (!project) {
-    return [];
-  }
-  const source = sourceEngineFolder();
-  const buildEngineRoot = detectBuildEngineRoot(project, includePaths);
-  if (buildEngineRoot && source) {
-    return [
-      {
-        fromRoot: buildEngineRoot,
-        toRef: normalizePath(source.path),
-        verifyBase: source.path,
-        exists: (absPath) => fs.existsSync(absPath),
-      },
-    ];
-  }
-  return [];
-}
 
 const EMPTY_CONFIG: SourceFileConfiguration = {
   includePath: [],
@@ -88,7 +64,7 @@ class O3deConfigurationProvider implements CustomConfigurationProvider {
         continue;
       }
       const includePaths = reply.targets.flatMap((t) => t.compile.includes.map((i) => i.path));
-      const model = buildProviderModel(reply, project.path, buildAbsoluteMappings(project, includePaths));
+      const model = buildProviderModel(reply, project.path, absoluteEngineMappings(project, includePaths));
       log().info(`IntelliSense engine (${project.projectName}): ${engineModeDetail(detectEngineMode(project, includePaths))}`);
       for (const [key, value] of model.perFile) {
         perFile.set(key, value);

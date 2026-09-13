@@ -97,6 +97,7 @@ export class O3deMcpServer {
         allowForceClose: allowForceClose(),
         version,
         buildOptions: this.buildOptions,
+        workspaceState: this.context.workspaceState,
       });
       livePort = this.handle.port; // publish the actual bound port (for the Optional row / status)
       this.writeClientConfig(); // keep the project's .mcp.json in sync with the live port
