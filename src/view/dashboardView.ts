@@ -35,6 +35,7 @@ import { engineModeDetail, engineModeLabel } from "../intellisense/engineMode";
 import { cppFreshnessDetail, cppFreshnessLabel, luaFreshnessDetail, luaFreshnessLabel } from "../intellisense/freshness";
 import { IntelliSenseSnapshot, IntelliSenseStatus } from "../intellisense/intellisenseStatus";
 import { runningEngineDetail, runningEngineLabel } from "../intellisense/intellisenseEngine";
+import { databaseDetail, databaseLabel } from "../intellisense/clangdDatabase";
 import { loadIcon } from "./svgAssets";
 import { getNonce } from "./webviewUtil";
 
@@ -66,6 +67,7 @@ const COMMANDS: Record<string, string> = {
   showCppDataStatus: "o3de.showCppDataStatus",
   showLuaReflectionStatus: "o3de.showLuaReflectionStatus",
   selectIntelliSenseEngine: "o3de.selectIntelliSenseEngine",
+  showClangdDatabaseStatus: "o3de.showClangdDatabaseStatus",
   classWizard: "o3de.classWizard",
   selectRunTarget: "o3de.selectRunTarget",
   setLaunchArgs: "o3de.setLaunchArgs",
@@ -161,6 +163,17 @@ function configPayload(
             tip: runningEngineDetail(intellisense.activeEngine.running, intellisense.activeEngine.inputs),
             cmd: "selectIntelliSenseEngine",
           },
+          // Only while clangd uses O3DE's compile database — the database has no state worth showing otherwise.
+          ...(intellisense.clangdDatabase.state === "notInUse"
+            ? []
+            : [
+                {
+                  label: "clangd Database",
+                  value: databaseLabel(intellisense.clangdDatabase),
+                  tip: databaseDetail(intellisense.clangdDatabase),
+                  cmd: "showClangdDatabaseStatus",
+                },
+              ]),
           {
             label: "Engine Sources",
             value: engineModeLabel(intellisense.engine),

@@ -1,7 +1,7 @@
 // ============================================================================
 //  IntelliSense status — the cached readout behind the dashboard's
-//  IntelliSense ▸ Status rows (IntelliSense Engine, Engine Sources, C++ Data,
-//  Lua Reflection).
+//  IntelliSense ▸ Status rows (IntelliSense Engine, clangd Database, Engine
+//  Sources, C++ Data, Lua Reflection).
 //
 //  Computing it reads engine.json files, the File API reply, ~1.7k CMake input
 //  timestamps and the build's module binaries (tens of ms). The dashboard
@@ -16,6 +16,7 @@
 //    a Lua dump was written                 watcher: user/lua_symbols.json
 //    the running C++ engine changed         C_Cpp.intelliSenseEngine / clangd.enable /
 //                                           clangd.arguments settings, installed extensions
+//    clangd's compile database generated    onDidGenerateDatabase
 // ============================================================================
 
 import * as vscode from "vscode";
@@ -26,7 +27,9 @@ import { DependencyStatus } from "../deps/dependencyStatus";
 import { readProject } from "../o3de/identity";
 import { primaryO3deFolder } from "../workspace/projectScope";
 import { EngineModeReport, detectEngineMode } from "./engineMode";
-import { readEngineInputs } from "./clangdMode";
+import { onDidGenerateDatabase, readEngineInputs } from "./clangdMode";
+import { DatabaseStatus } from "./clangdDatabase";
+import { readDatabaseStatus } from "./clangdSync";
 import { EngineInputs, RunningEngine, runningEngine } from "./intellisenseEngine";
 import {
   CppFreshness,
@@ -42,6 +45,7 @@ import {
 // ---- Snapshot --------------------------------------------------------------
 export interface IntelliSenseSnapshot {
   activeEngine: { running: RunningEngine; inputs: EngineInputs }; // which C++ engine is running (C/C++ or clangd)
+  clangdDatabase: DatabaseStatus; // O3DE's compile database, while clangd uses it
   engine: EngineModeReport;
   cpp: CppFreshness;
   lua: LuaFreshness;
@@ -54,12 +58,14 @@ export function computeIntelliSenseSnapshot(configName: string): IntelliSenseSna
   const folder = primaryO3deFolder();
   const project = folder ? readProject(folder.uri.fsPath) : undefined;
   const engine = detectEngineMode(project);
+  const clangdDatabase = readDatabaseStatus(project, configName, activeEngine.running);
   if (!project) {
-    return { activeEngine, engine, cpp: cppFreshness(undefined, undefined), lua: luaFreshness(undefined, undefined, []) };
+    return { activeEngine, clangdDatabase, engine, cpp: cppFreshness(undefined, undefined), lua: luaFreshness(undefined, undefined, []) };
   }
   const replyDir = fileApiReplyDir(project.path);
   return {
     activeEngine,
+    clangdDatabase,
     engine,
     cpp: readCppFreshness(replyDir),
     lua: readLuaFreshness(project.path, replyDir, configName, engine.buildEngine?.path),
@@ -106,6 +112,7 @@ export class IntelliSenseStatus implements vscode.Disposable {
         }
       }),
       vscode.extensions.onDidChange(() => this.schedule()),
+      onDidGenerateDatabase(() => this.schedule()),
       // Progress ticks fire constantly — only the running → idle edge can change the answer.
       buildState.onDidChange((activity) => {
         const working = isWorking(activity);

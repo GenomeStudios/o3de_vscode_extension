@@ -231,17 +231,22 @@ export function detectExtension(extensionId: string): CheckResult {
 const CLANGD_EXTENSION = "llvm-vs-code-extensions.vscode-clangd";
 const CLANGD_SERVER_STEP: GuidedAction = { label: "Download clangd server…", kind: "command", payload: "clangd.activate" };
 
-export async function detectClangd(): Promise<CheckResult> {
-  if (!vscode.extensions.getExtension(CLANGD_EXTENSION)) {
-    return { state: "absent", detail: "Not installed" };
-  }
-  const server = resolveClangdExecutable(vscode.workspace.getConfiguration("clangd").get<string>("path") ?? "clangd", {
+/** The clangd server the clangd extension would start (its `clangd.path`), or undefined when there is none. */
+export function findClangdServer(): string | undefined {
+  return resolveClangdExecutable(vscode.workspace.getConfiguration("clangd").get<string>("path") ?? "clangd", {
     env: process.env,
     platform: process.platform,
     home: os.homedir(),
     workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     exists: (file) => fs.existsSync(file) && fs.statSync(file).isFile(),
   });
+}
+
+export async function detectClangd(): Promise<CheckResult> {
+  if (!vscode.extensions.getExtension(CLANGD_EXTENSION)) {
+    return { state: "absent", detail: "Not installed" };
+  }
+  const server = findClangdServer();
   if (!server) {
     return { state: "warn", detail: "Extension installed · clangd server not found", action: CLANGD_SERVER_STEP };
   }

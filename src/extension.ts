@@ -45,6 +45,7 @@ import { registerConfigurationProvider } from "./intellisense/provider";
 import { showEngineMode } from "./intellisense/engineMode";
 import { IntelliSenseStatus, showCppDataStatus, showLuaReflectionStatus } from "./intellisense/intellisenseStatus";
 import { selectIntelliSenseEngine } from "./intellisense/clangdMode";
+import { ClangdDatabaseSync, showClangdDatabaseStatus } from "./intellisense/clangdSync";
 import { registerLuaDebug, debugLuaFile } from "./lua/debug/debugAdapter";
 import { registerLuaHandoff } from "./lua/handoff";
 import { generateLuaIntelliSense, generateLuaStubsFromDump } from "./lua/intellisense/intelliSense";
@@ -444,6 +445,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const selectIntelliSenseEngineCmd = vscode.commands.registerCommand("o3de.selectIntelliSenseEngine", () => {
     void selectIntelliSenseEngine(buildOptions, context.workspaceState, intellisenseStatus);
   });
+  // clangd automation: clangd-only mode (no C/C++ extension → clangd on, once) and, while clangd uses O3DE's
+  // compile database, keeping it current (configure / config switch / folders / extensions / startup).
+  const clangdDatabaseSync = new ClangdDatabaseSync(buildOptions, context.workspaceState, isWorkspaceEnabled);
+  const showClangdDatabaseStatusCmd = vscode.commands.registerCommand("o3de.showClangdDatabaseStatus", () => {
+    void showClangdDatabaseStatus(buildOptions, intellisenseStatus);
+  });
 
   // Commands: choose the CMake generator / build config (shown in the tab, persisted).
   const selectGenerator = vscode.commands.registerCommand("o3de.selectGenerator", async () => {
@@ -634,6 +641,8 @@ export function activate(context: vscode.ExtensionContext): void {
     showCppDataStatusCmd,
     showLuaReflectionStatusCmd,
     selectIntelliSenseEngineCmd,
+    clangdDatabaseSync,
+    showClangdDatabaseStatusCmd,
     selectGenerator,
     selectConfig,
     selectCompiler,

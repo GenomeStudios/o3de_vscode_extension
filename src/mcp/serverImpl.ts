@@ -11,7 +11,8 @@
 //  it to that session's transport. Every request must carry the bearer token.
 //  Tools: health (o3de_ping), build (o3de_build + _status/_log), run
 //  (o3de_is_running, o3de_run), config (o3de_get/set_config, o3de_list_targets),
-//  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine).
+//  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine,
+//  o3de_update_clangd_database).
 // ============================================================================
 
 import * as http from "http";
@@ -26,7 +27,8 @@ import { startBuildJob, getBuildJob } from "../build/buildJobs";
 import { BuildResult } from "../build/buildOutput";
 import { configSnapshot, applyConfig, listTargets } from "../build/configQuery";
 import { runStatus, launchRunTarget, forceCloseRuntime } from "../build/runQuery";
-import { intellisenseReport, setIntelliSenseEngine } from "../intellisense/intellisenseQuery";
+import { intellisenseReport, setIntelliSenseEngine, updateClangdDatabase } from "../intellisense/intellisenseQuery";
+import { syncMessage } from "../intellisense/clangdSync";
 import type { Memento } from "vscode";
 
 const MCP_PATH = "/mcp";
@@ -494,8 +496,11 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       description:
         "Report C++ and Lua IntelliSense state for the workspace project — the same answers as the dashboard's " +
         "IntelliSense section: which C++ IntelliSense engine is running (the Microsoft C/C++ extension, clangd, both, " +
-        "or none) and whether a window reload is still needed to stop the C/C++ extension; whether the C/C++ and " +
+        "or none) and whether a window reload is still needed to stop the C/C++ extension; clangdOnly (no C/C++ " +
+        "extension, clangd installed — O3DE then switches clangd on automatically, once per workspace); whether the C/C++ and " +
         "clangd extensions are installed (with versions, and whether clangd's language server has been downloaded); " +
+        "while clangd uses O3DE's compile database, whether that database is current (clangdDatabase: upToDate / " +
+        "updatePending / notConfigured / noProject, with entry counts; notInUse otherwise); " +
         "how far navigation reaches into engine code (engineSources: native / redirected / headersOnly / unresolved); " +
         "whether C++ data is stale and needs a reconfigure (cppData); and whether Lua reflection is stale (luaReflection).",
       inputSchema: {},
@@ -507,6 +512,7 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         `Engine: ${report.engine.label}${report.engine.cppToolsStopsAfterReload ? " (reload pending)" : ""} · ` +
         `C/C++ ${report.extensions.cppTools.installed ? "installed" : "not installed"} · ` +
         `clangd ${report.extensions.clangd.installed ? (report.extensions.clangd.server.found ? "installed" : "installed, server not found") : "not installed"} · ` +
+        (report.clangdDatabase.state === "notInUse" ? "" : `clangd database: ${report.clangdDatabase.label} · `) +
         `Engine sources: ${report.engineSources.label} · C++ data: ${report.cppData.label} · Lua: ${report.luaReflection.label}`;
       return { content: [txt(line), txt(JSON.stringify(report, null, 2))] };
     },
@@ -538,6 +544,27 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
           (result.database ? ` Compile database: ${result.database.entries} entries (${result.database.engineEntries} engine).` : "") +
           (result.reloadRequired ? " Reload the window to stop the C/C++ extension's IntelliSense." : "");
       return { content: [txt(line), txt(JSON.stringify(result, null, 2))], isError: !result.ok };
+    },
+  );
+
+  server.registerTool(
+    "o3de_update_clangd_database",
+    {
+      title: "O3DE Update clangd Compile Database",
+      description:
+        "Regenerate O3DE's compile database for clangd now, from the project's last CMake configure and the current " +
+        "build config. It already updates itself after a configure, a build-config switch, a workspace folder change " +
+        "and at startup — call this only when o3de_intellisense_status reports clangdDatabase updatePending, or after " +
+        "changing engine sources the configure doesn't track. Only acts while clangd uses O3DE's database (ran:false " +
+        "otherwise). clangd restarts only when the content changed. A source file added in CMake needs a reconfigure " +
+        "first — this tool doesn't configure.",
+      inputSchema: {},
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => {
+      const outcome = await updateClangdDatabase(opts.buildOptions);
+      const failed = outcome.ran && !outcome.generation.ok;
+      return { content: [txt(syncMessage(outcome)), txt(JSON.stringify(outcome, null, 2))], isError: failed };
     },
   );
 

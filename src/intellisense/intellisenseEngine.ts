@@ -74,11 +74,10 @@ export function runningEngineDetail(running: RunningEngine, inputs: EngineInputs
         " Click to choose the engine."
       );
     case "clangd":
-      return (
-        "clangd provides C++ IntelliSense" +
-        (inputs.cppToolsInstalled ? "; the C/C++ extension's IntelliSense is off here (it still handles debugging)." : ".") +
-        " Click to choose the engine."
-      );
+      return inputs.cppToolsInstalled
+        ? "clangd provides C++ IntelliSense; the C/C++ extension's IntelliSense is off here (it still handles debugging). Click to choose the engine."
+        : "clangd provides C++ IntelliSense. The C/C++ extension isn't installed, so clangd is this workspace's only C++ " +
+            "IntelliSense engine and O3DE switches it on automatically.";
     case "both":
       return "The C/C++ extension and clangd are both providing IntelliSense, which duplicates completions and diagnostics. Click to choose one.";
     case "none":
@@ -108,6 +107,39 @@ export function nextReloadPending(choice: EngineChoice, before: RunningEngine, p
     return false;
   }
   return pending || before === "cpptools" || before === "both";
+}
+
+// ---- clangd-only (automatic) -----------------------------------------------
+// Without the C/C++ extension (e.g. Open VSX editors, where it isn't published), clangd is the ONLY C++
+// IntelliSense engine — so O3DE switches it on by itself instead of waiting to be asked (owner, plan Q13).
+// Once per workspace: after it's applied (or found already in place), later changes are the user's.
+
+export type ClangdOnlyDecision =
+  | "apply" // switch clangd on, on O3DE's compile database
+  | "notClangdOnly" // the C/C++ extension is installed, or clangd isn't
+  | "alreadyInUse" // clangd already runs on O3DE's database — nothing to do
+  | "alreadyApplied" // done before in this workspace; the user's later changes stand
+  | "pointedElsewhere"; // clangd reads its own compile database — never overridden
+
+export interface ClangdOnlyInputs {
+  cppToolsInstalled: boolean;
+  clangdInstalled: boolean;
+  inUse: boolean; // clangd runs on O3DE's database
+  applied: boolean; // O3DE applied clangd-only in this workspace before
+  pointedElsewhere: boolean; // clangd.arguments names a compile-commands dir that isn't O3DE's
+}
+
+export function clangdOnlyDecision(inputs: ClangdOnlyInputs): ClangdOnlyDecision {
+  if (inputs.cppToolsInstalled || !inputs.clangdInstalled) {
+    return "notClangdOnly";
+  }
+  if (inputs.inUse) {
+    return "alreadyInUse";
+  }
+  if (inputs.applied) {
+    return "alreadyApplied";
+  }
+  return inputs.pointedElsewhere ? "pointedElsewhere" : "apply";
 }
 
 // ---- clangd arguments ------------------------------------------------------

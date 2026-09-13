@@ -16,6 +16,8 @@ import { resolveWorkspaceProject } from "./projectResolve";
 import { runArgsFor } from "./runCommand";
 import { buildInFlightReason, resolveRunnable } from "./run";
 import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
+import { CPPTOOLS_EXTENSION_ID } from "../constants";
+import { runGuidedAction } from "../deps/actions";
 
 // The debugger `environment` adds/overrides — clear the VS Code-injected vars so a
 // debugged Editor's own child launches (e.g. the Lua-editor handoff) aren't poisoned.
@@ -51,13 +53,16 @@ export async function runInDebug(options: BuildOptions): Promise<void> {
     void vscode.window.showWarningMessage(`O3DE: ${blocked}`);
     return;
   }
-  if (!vscode.extensions.getExtension("ms-vscode.cpptools")) {
+  // The C++ debugger ships in the C/C++ extension — needed even while clangd provides IntelliSense.
+  if (!vscode.extensions.getExtension(CPPTOOLS_EXTENSION_ID)) {
+    const install = "Install C/C++";
     const pick = await vscode.window.showErrorMessage(
-      "O3DE: Run in Debug needs the C/C++ extension (ms-vscode.cpptools).",
-      "Install C/C++",
+      `O3DE: Run in Debug needs the C/C++ extension (${CPPTOOLS_EXTENSION_ID}), which provides the C++ debugger.`,
+      install,
     );
-    if (pick === "Install C/C++") {
-      await vscode.commands.executeCommand("workbench.extensions.installExtension", "ms-vscode.cpptools");
+    if (pick === install) {
+      // Onboarding's install action: this editor's own marketplace, with its extension page as the fallback.
+      await runGuidedAction({ label: install, kind: "extension", payload: CPPTOOLS_EXTENSION_ID });
     }
     return;
   }

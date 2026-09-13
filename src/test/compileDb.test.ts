@@ -48,7 +48,7 @@ function target(spec: Omit<CommandTarget, "compile">): CommandTarget {
   };
 }
 function reply(targets: CommandTarget[]): CommandReply {
-  return { sourceDir: SOURCE, buildDir: BUILD, compilerPath: CL, targets };
+  return { config: "profile", sourceDir: SOURCE, buildDir: BUILD, compilerPath: CL, targets };
 }
 
 // ---- Tokens ------------------------------------------------------------------

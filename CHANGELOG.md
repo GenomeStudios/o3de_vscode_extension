@@ -81,18 +81,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Every change is a **workspace** setting — never your user settings — and switching back restores
   the values the workspace had before O3DE changed them. The project must be configured first;
   if it isn't, the switch offers **Configure Project**.
-- **MCP IntelliSense tools** — the LLM/MCP endpoint gains two tools:
+- **clangd's compile database keeps itself up to date.** While clangd is using O3DE's compile
+  database, it is regenerated automatically:
+  - after a project configure;
+  - when you switch build config;
+  - when a workspace folder is added or removed — adding a source engine adds its Framework
+    sources;
+  - when VS Code starts.
+
+  clangd restarts only when the database's content actually changed, so a configure that changed no
+  flags doesn't interrupt it. clangd is never restarted when its language server hasn't been
+  downloaded, which would re-show clangd's download prompt after every configure. A clangd pointed
+  at its own compile database is never touched.
+
+  **IntelliSense ▸ Status ▸ clangd Database** appears while clangd is using O3DE's database. It shows
+  **Up to date · *n* entries**, **Update pending**, or **Not configured**. Hover it for details, or
+  click it (or run **O3DE: Show clangd Compile Database Status**) to see the file and **Update Now**.
+- **clangd switches itself on when the C/C++ extension isn't installed.** Without the Microsoft C/C++
+  extension, clangd is the only C++ IntelliSense available. That's the case in editors that use
+  Open VSX, where the C/C++ extension isn't published. So O3DE Development Tools turns clangd on
+  without asking, on O3DE's compile database, and tells you once.
+  - It happens once per workspace. If you later switch clangd off or point it at your own compile
+    database, that choice stands.
+  - A clangd already pointed at its own compile database is never overridden.
+  - If the project isn't configured yet, it waits and switches clangd on after the first configure.
+  - Installing the C/C++ extension later changes nothing automatically. The IntelliSense Engine row
+    shows **Both running (conflict)**; click it to choose.
+- **MCP IntelliSense tools** — the LLM/MCP endpoint gains three tools:
   - **`o3de_intellisense_status`** (read-only) returns what the dashboard's IntelliSense section
     shows:
     - which C++ IntelliSense engine is running, and whether a window reload is still needed to stop
       the C/C++ extension;
+    - `clangdOnly`: the C/C++ extension isn't installed but clangd is, so clangd is switched on
+      automatically;
     - whether the C/C++ and clangd extensions are installed, with versions, and whether clangd's
       language server has been downloaded;
+    - while clangd uses O3DE's compile database, whether that database is up to date, with entry
+      counts;
     - the Engine Sources, C++ Data and Lua Reflection status.
   - **`o3de_set_intellisense_engine`** (`cpptools` or `clangd`) switches the engine exactly as the
     dashboard does. It reports the result as data instead of showing prompts: settings changed,
     compile database entries, and `reloadRequired`. It never installs an extension; a missing one
     is reported as `notInstalled`.
+  - **`o3de_update_clangd_database`** regenerates clangd's compile database on demand, exactly like
+    the clangd Database row's **Update Now**. It does nothing while clangd isn't using O3DE's
+    database.
 
 ### Changed
 
@@ -107,6 +140,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Run in Debug's "Install C/C++" offer uses this editor's own marketplace**, like every other install
+  in Setup & Onboarding. If the in-app install fails, it opens the extension's page on that same
+  marketplace, or says there is none, instead of failing silently. The message also explains that
+  the C/C++ extension provides the C++ debugger, which is still needed while clangd provides
+  IntelliSense.
 - **The project's engine is taken from its direct engine path first.** O3DE records the exact engine
   a project uses as `engine_path` in `<project>/user/project.json`, and O3DE's own tools read it
   before anything else. The extension only looked at the engine *name* in `project.json` — which stops

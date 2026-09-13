@@ -2,9 +2,10 @@
 //  IntelliSense query — read the IntelliSense state + switch the C++ engine.
 //
 //  Backs the LLM/MCP IntelliSense tools (o3de_intellisense_status /
-//  o3de_set_intellisense_engine) with the SAME answers the dashboard shows:
-//    - IntelliSense ▸ Status rows (IntelliSense Engine, Engine Sources, C++ Data,
-//      Lua Reflection)
+//  o3de_set_intellisense_engine / o3de_update_clangd_database) with the SAME
+//  answers the dashboard shows:
+//    - IntelliSense ▸ Status rows (IntelliSense Engine, clangd Database, Engine
+//      Sources, C++ Data, Lua Reflection)
 //    - Setup & Onboarding's C/C++ and clangd extension rows
 //  Switching runs the same headless core as the dashboard's switch, so settings
 //  written from an assistant show up on the dashboard live.
@@ -15,6 +16,8 @@ import { BuildOptions } from "../build/buildOptions";
 import { CLANGD_EXTENSION_ID, CPPTOOLS_EXTENSION_ID } from "../constants";
 import { detectClangd } from "../deps/detectors";
 import { EngineSwitchResult, cppToolsStopsAfterReload, switchEngine } from "./clangdMode";
+import { DatabaseStatus, databaseDetail, databaseLabel } from "./clangdDatabase";
+import { SyncOutcome, syncClangdDatabase } from "./clangdSync";
 import { EngineModeReport, engineModeDetail, engineModeLabel } from "./engineMode";
 import { CppFreshness, LuaFreshness, cppFreshnessDetail, cppFreshnessLabel, luaFreshnessDetail, luaFreshnessLabel } from "./freshness";
 import { EngineChoice, RunningEngine, runningEngineDetail, runningEngineLabel } from "./intellisenseEngine";
@@ -34,11 +37,13 @@ export interface IntelliSenseReport {
     detail: string;
     settings: { cppToolsIntelliSenseEngine?: string; clangdEnable?: boolean }; // effective values
     cppToolsStopsAfterReload: boolean; // switched off by O3DE, still running until the window reloads
+    clangdOnly: boolean; // no C/C++ extension + clangd installed → O3DE switches clangd on automatically
   };
   extensions: {
     cppTools: ExtensionInstall;
     clangd: ExtensionInstall & { server: { found: boolean; detail: string } }; // the onboarding row's staged state
   };
+  clangdDatabase: DatabaseStatus & { label: string; detail: string }; // state notInUse unless clangd uses O3DE's database
   engineSources: EngineModeReport & { label: string; detail: string };
   cppData: CppFreshness & { label: string; detail: string };
   luaReflection: LuaFreshness & { label: string; detail: string };
@@ -57,6 +62,7 @@ export async function intellisenseReport(buildOptions: BuildOptions): Promise<In
       detail: runningEngineDetail(running, inputs),
       settings: { cppToolsIntelliSenseEngine: inputs.cppToolsEngine, clangdEnable: inputs.clangdEnable },
       cppToolsStopsAfterReload: cppToolsStopsAfterReload(),
+      clangdOnly: !inputs.cppToolsInstalled && inputs.clangdInstalled,
     },
     extensions: {
       cppTools: extensionInstall(CPPTOOLS_EXTENSION_ID),
@@ -66,6 +72,11 @@ export async function intellisenseReport(buildOptions: BuildOptions): Promise<In
           ? { found: server.state === "ok", detail: server.detail ?? "" }
           : { found: false, detail: "clangd extension not installed" },
       },
+    },
+    clangdDatabase: {
+      ...snapshot.clangdDatabase,
+      label: databaseLabel(snapshot.clangdDatabase),
+      detail: databaseDetail(snapshot.clangdDatabase),
     },
     engineSources: { ...snapshot.engine, label: engineModeLabel(snapshot.engine), detail: engineModeDetail(snapshot.engine) },
     cppData: { ...snapshot.cpp, label: cppFreshnessLabel(snapshot.cpp), detail: cppFreshnessDetail(snapshot.cpp) },
@@ -81,6 +92,11 @@ export function setIntelliSenseEngine(
   engine: EngineChoice,
 ): Promise<EngineSwitchResult> {
   return switchEngine(engine, buildOptions, workspaceState);
+}
+
+/** Regenerate clangd's compile database now (only while clangd uses it); restarts clangd if it changed. */
+export function updateClangdDatabase(buildOptions: BuildOptions): Promise<SyncOutcome> {
+  return syncClangdDatabase(buildOptions, "mcp");
 }
 
 // ---- Internal --------------------------------------------------------------

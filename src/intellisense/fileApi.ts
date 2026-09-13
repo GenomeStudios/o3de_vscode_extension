@@ -96,6 +96,7 @@ export interface CommandTarget {
 }
 
 export interface CommandReply {
+  config: string; // the configuration the flags came from — may not be the one asked for (pickConfiguration)
   sourceDir: string;
   buildDir: string;
   compilerPath?: string;
@@ -415,6 +416,7 @@ export function loadCommandReply(replyDir: string, configName: string): CommandR
     .filter((json): json is TargetJson => json !== undefined && (json.compileGroups ?? []).length > 0)
     .map(parseCommandTarget);
   return {
+    config: config.name,
     sourceDir: codemodel.paths?.source ?? "",
     buildDir: codemodel.paths?.build ?? "",
     compilerPath: toolchainsName

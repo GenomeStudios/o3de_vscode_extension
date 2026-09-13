@@ -31,7 +31,8 @@ import { CLANGD_EXTENSION_ID, CPPTOOLS_EXTENSION_ID } from "../constants";
 import { runGuidedAction } from "../deps/actions";
 import { readProject } from "../o3de/identity";
 import { primaryO3deFolder } from "../workspace/projectScope";
-import { loadCommandReply } from "./fileApi";
+import { loadCommandReply, replyTimestamp } from "./fileApi";
+import { DatabaseGeneration, DatabaseRecord } from "./clangdDatabase";
 import { buildCompileDatabase, compileDatabaseDir, listFrameworkSources, projectIncludePaths, writeCompileDatabase } from "./compileDb";
 import { absoluteEngineMappings } from "./engineMappings";
 import { detectEngineMode } from "./engineMode";
@@ -89,20 +90,37 @@ function inheritedClangdEnable(): boolean {
 }
 
 // ---- Compile database ------------------------------------------------------
-export type DatabaseOutcome =
-  | { ok: true; dir: string; file: string; entries: number; engineEntries: number; changed: boolean }
-  | { ok: false; reason: "noProject" | "notConfigured" };
+// Every generation — from the engine switch, the automatic sync (clangdSync.ts), a command or an MCP
+// call — is recorded here, so the status row and the MCP status report one truth.
+let lastGeneration: DatabaseGeneration | undefined;
+const generated = new vscode.EventEmitter<DatabaseGeneration>();
+
+/** Fires after every generation attempt. */
+export const onDidGenerateDatabase = generated.event;
+
+/** This session's latest generation attempt (undefined until one runs). */
+export function lastDatabaseGeneration(): DatabaseGeneration | undefined {
+  return lastGeneration;
+}
+
+function record(generation: DatabaseGeneration): DatabaseGeneration {
+  lastGeneration = generation;
+  generated.fire(generation);
+  return generation;
+}
 
 /** Build and write O3DE's compile database for the workspace's primary project. */
-export function generateWorkspaceDatabase(options: BuildOptions): DatabaseOutcome {
+export function generateWorkspaceDatabase(options: BuildOptions, trigger: string): DatabaseGeneration {
+  const started = Date.now();
   const folder = primaryO3deFolder();
   const project = folder ? readProject(folder.uri.fsPath) : undefined;
   if (!project) {
-    return { ok: false, reason: "noProject" };
+    return record({ ok: false, at: started, trigger, reason: "noProject" });
   }
-  const reply = loadCommandReply(fileApiReplyDir(project.path), options.config);
+  const replyDir = fileApiReplyDir(project.path);
+  const reply = loadCommandReply(replyDir, options.config);
   if (!reply) {
-    return { ok: false, reason: "notConfigured" };
+    return record({ ok: false, at: started, trigger, reason: "notConfigured" });
   }
   const includePaths = reply.targets.flatMap((target) => target.compile.includes.map((include) => include.path));
   const mappings = absoluteEngineMappings(project, includePaths);
@@ -116,18 +134,42 @@ export function generateWorkspaceDatabase(options: BuildOptions): DatabaseOutcom
 
   const commands = buildCompileDatabase(reply, mappings, engineSources);
   const written = writeCompileDatabase(reply.buildDir, commands);
+  const durationMs = Date.now() - started;
+  const flags = reply.config.toLowerCase() === options.config.toLowerCase() ? reply.config : `${reply.config} flags — no ${options.config} configuration`;
   log().info(
-    `clangd compile database: ${written.entries} entries (${engineSources.length} engine Framework) → ${written.file}` +
-      (written.changed ? "" : " (unchanged)"),
+    `clangd compile database (${trigger}, ${flags}): ${written.entries} entries (${engineSources.length} engine Framework) → ` +
+      `${written.file}${written.changed ? "" : " (unchanged)"} in ${durationMs} ms`,
   );
-  return {
+  return record({
     ok: true,
+    at: started,
+    trigger,
+    config: options.config,
+    flagsConfig: reply.config,
+    replyTimestamp: replyTimestamp(replyDir),
     dir: compileDatabaseDir(reply.buildDir),
     file: written.file,
     entries: written.entries,
     engineEntries: engineSources.length,
     changed: written.changed,
-  };
+    durationMs,
+  });
+}
+
+// ---- clangd commands -------------------------------------------------------
+/** Run a clangd command; a clangd that isn't there or fails to run is logged, never raised. */
+export async function runClangdCommand(command: "clangd.restart" | "clangd.shutdown"): Promise<boolean> {
+  if (!vscode.extensions.getExtension(CLANGD_EXTENSION_ID)) {
+    log().info(`${command} skipped: the clangd extension isn't installed.`);
+    return false;
+  }
+  try {
+    await vscode.commands.executeCommand(command);
+    return true;
+  } catch (err) {
+    log().warn(`${command} failed: ${String(err)}`);
+    return false;
+  }
 }
 
 // ---- Applying a choice -----------------------------------------------------
@@ -159,11 +201,22 @@ export type EngineSwitchResult =
     }
   | { ok: false; reason: "noWorkspace" | "notInstalled" | "noProject" | "notConfigured"; message: string };
 
+// Switches run ONE AT A TIME. Two interleaved switches (e.g. the engine picker installing clangd while
+// clangd-only mode reacts to that install) could each read the prior-values record before the other saved
+// it, and record O3DE's own writes as the user's originals.
+let switchQueue: Promise<unknown> = Promise.resolve();
+
 /**
  * Make `choice` the running engine for this workspace — HEADLESS: no prompts, no notifications.
- * The dashboard's switch (applyEngineChoice) and the MCP tool both run this and present the result.
+ * The dashboard's switch (applyEngineChoice), clangd-only mode and the MCP tool all run this.
  */
-export async function switchEngine(
+export function switchEngine(choice: EngineChoice, options: BuildOptions, memento: vscode.Memento): Promise<EngineSwitchResult> {
+  const run = switchQueue.then(() => switchEngineNow(choice, options, memento));
+  switchQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function switchEngineNow(
   choice: EngineChoice,
   options: BuildOptions,
   memento: vscode.Memento,
@@ -178,9 +231,9 @@ export async function switchEngine(
   }
 
   // clangd needs O3DE's compile database before anything changes.
-  let database: Extract<DatabaseOutcome, { ok: true }> | undefined;
+  let database: DatabaseRecord | undefined;
   if (choice === "clangd") {
-    const outcome = generateWorkspaceDatabase(options);
+    const outcome = generateWorkspaceDatabase(options, "switch");
     if (!outcome.ok) {
       return outcome.reason === "noProject"
         ? { ok: false, reason: "noProject", message: "No O3DE project is open in this workspace." }
@@ -200,11 +253,8 @@ export async function switchEngine(
   await writeSettings(plan.writes);
   await memento.update(PRIOR_KEY, plan.prior);
 
-  if (choice === "clangd") {
-    await vscode.commands.executeCommand("clangd.restart"); // enable is already true for the workspace — no prompt
-  } else if (inputs.clangdInstalled) {
-    await vscode.commands.executeCommand("clangd.shutdown"); // no prompt, no enable check
-  }
+  // restart: enable is already true for the workspace, so clangd doesn't prompt. shutdown: no prompt, no enable check.
+  await runClangdCommand(choice === "clangd" ? "clangd.restart" : "clangd.shutdown");
   cppToolsReloadPending = nextReloadPending(choice, runningEngine(inputs), cppToolsReloadPending);
 
   return {

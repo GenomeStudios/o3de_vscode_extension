@@ -10,6 +10,7 @@ import {
   ManagedKey,
   PlanInputs,
   PriorValues,
+  clangdOnlyDecision,
   engineSwitchBlocker,
   nextReloadPending,
   planEngine,
@@ -169,5 +170,34 @@ suite("intellisenseEngine switch rules", () => {
 
   test("switching back to C/C++ before reloading clears the debt (it never stopped)", () => {
     assert.strictEqual(nextReloadPending("cpptools", "clangd", true), false);
+  });
+});
+
+// ---- clangd-only (automatic) -----------------------------------------------------
+suite("intellisenseEngine.clangdOnlyDecision", () => {
+  const clangdOnly = { cppToolsInstalled: false, clangdInstalled: true, inUse: false, applied: false, pointedElsewhere: false };
+
+  test("no C/C++ extension + clangd installed, first time → switch clangd on", () => {
+    assert.strictEqual(clangdOnlyDecision(clangdOnly), "apply");
+  });
+
+  test("the C/C++ extension installed → never automatic (the user chooses)", () => {
+    assert.strictEqual(clangdOnlyDecision({ ...clangdOnly, cppToolsInstalled: true }), "notClangdOnly");
+  });
+
+  test("clangd not installed → nothing to switch on", () => {
+    assert.strictEqual(clangdOnlyDecision({ ...clangdOnly, clangdInstalled: false }), "notClangdOnly");
+  });
+
+  test("already running on O3DE's database → nothing to do", () => {
+    assert.strictEqual(clangdOnlyDecision({ ...clangdOnly, inUse: true }), "alreadyInUse");
+  });
+
+  test("applied before in this workspace → the user's later changes stand (e.g. clangd switched off)", () => {
+    assert.strictEqual(clangdOnlyDecision({ ...clangdOnly, applied: true }), "alreadyApplied");
+  });
+
+  test("clangd reads its own compile database → never overridden", () => {
+    assert.strictEqual(clangdOnlyDecision({ ...clangdOnly, pointedElsewhere: true }), "pointedElsewhere");
   });
 });
