@@ -5,8 +5,9 @@
 //  o3de_list_targets) so an assistant can inspect the current build attributes,
 //  change them, and discover every real CMake target — enabling purposeful
 //  builds beyond the user's default selection. Thin wrappers over BuildOptions
-//  (the same state the panel edits, so changes reflect live in the UI) plus the
-//  File API reply for the target list.
+//  (the same state the panel edits, so changes reflect live in the UI), the
+//  Advanced tab's CMake flags (configureArgs.ts), and the File API reply for the
+//  target list.
 // ============================================================================
 
 import * as fs from "fs";
@@ -16,6 +17,14 @@ import { fileApiReplyDir, projectBuildDir } from "./configureCommand";
 import { curatedTargets } from "./buildCommand";
 import { loadTargetNames, loadExecutableTargets } from "../intellisense/fileApi";
 import { isConfiguredFor } from "./configure";
+import {
+  CmakeFlagsReport,
+  applyCmakeFlagPatch,
+  invalidCmakeFlagNames,
+  readCmakeFlags,
+  readCmakeFlagsReport,
+  writeCmakeFlags,
+} from "./configureArgs";
 import {
   BuildOptions,
   Generator,
@@ -36,6 +45,10 @@ export interface ConfigSnapshot {
   targets: string[]; // empty = build everything
   runTarget: RunTarget;
   launchArgs: string;
+  coreCount: number; // parallel build jobs; 0 = let the generator decide
+  // The Advanced tab's extra CMake cache flags, each with whether the last configure applied it.
+  // `pending` = a configure is needed for the stored flags to take effect.
+  cmakeFlags?: CmakeFlagsReport;
   // runTargets lists only the two always-valid values — any executable target
   // name (o3de_list_targets → executables) is also accepted as a runTarget.
   options: { generators: Generator[]; compilers: Compiler[]; configs: BuildConfig[]; runTargets: RunTarget[] };
@@ -52,6 +65,8 @@ export function configSnapshot(buildOptions: BuildOptions): ConfigSnapshot {
     targets: buildOptions.targets,
     runTarget: buildOptions.runTarget,
     launchArgs: buildOptions.launchArgs,
+    coreCount: buildOptions.coreCount,
+    cmakeFlags: project ? readCmakeFlagsReport(project.path) : undefined,
     options: { generators: GENERATORS, compilers: COMPILERS, configs: BUILD_CONFIGS, runTargets: RUN_TARGETS },
     project: project
       ? {
@@ -72,6 +87,8 @@ export interface ConfigPatch {
   targets?: string[];
   runTarget?: RunTarget;
   launchArgs?: string;
+  coreCount?: number; // 0 = auto
+  cmakeFlags?: Record<string, string | null>; // set a flag; "" or null removes it. Others are kept.
 }
 
 /** Apply the provided fields (already schema-validated) and report which changed. */
@@ -100,6 +117,22 @@ export async function applyConfig(buildOptions: BuildOptions, patch: ConfigPatch
   if (patch.launchArgs !== undefined) {
     await buildOptions.setLaunchArgs(patch.launchArgs);
     applied.push("launchArgs");
+  }
+  if (patch.coreCount !== undefined) {
+    await buildOptions.setCoreCount(patch.coreCount);
+    applied.push("coreCount");
+  }
+  if (patch.cmakeFlags !== undefined && Object.keys(patch.cmakeFlags).length > 0) {
+    const invalid = invalidCmakeFlagNames(patch.cmakeFlags);
+    if (invalid.length > 0) {
+      throw new Error(`Not valid CMake variable names: ${invalid.join(", ")}.`);
+    }
+    const project = firstProject();
+    if (!project) {
+      throw new Error("No O3DE project in this workspace — CMake flags are stored per project.");
+    }
+    await writeCmakeFlags(project.path, applyCmakeFlagPatch(readCmakeFlags(project.path), patch.cmakeFlags));
+    applied.push("cmakeFlags");
   }
   return applied;
 }

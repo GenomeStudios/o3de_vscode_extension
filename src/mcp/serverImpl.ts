@@ -9,8 +9,9 @@
 //  HTTP with session routing. A client's `initialize` mints a session id; the
 //  client echoes it (mcp-session-id header) on every later request and we route
 //  it to that session's transport. Every request must carry the bearer token.
-//  Tools: health (o3de_ping), build (o3de_build + _status/_log), run
-//  (o3de_is_running, o3de_run), config (o3de_get/set_config, o3de_list_targets),
+//  Tools: health (o3de_ping), build (o3de_build + _status/_log), configure
+//  (o3de_configure + _status), o3de_stop, run (o3de_is_running, o3de_run),
+//  config (o3de_get/set_config incl. CMake flags, o3de_list_targets),
 //  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine,
 //  o3de_update_clangd_database).
 // ============================================================================
@@ -19,11 +20,18 @@ import * as http from "http";
 import { AddressInfo } from "net";
 import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { log } from "../log";
 import { BuildOptions, BuildConfig, RunTarget } from "../build/buildOptions";
 import { startBuildJob, getBuildJob } from "../build/buildJobs";
+import { startConfigureJob, getConfigureJob } from "../build/configureJobs";
+import { ConfigureResult } from "../build/configure";
+import { cancelManagedCommand, managedJob } from "../build/managedCommand";
+import { buildJobKey, configureJobKey } from "../build/jobKeys";
+import { firstWorkspaceProject } from "../build/projectResolve";
 import { BuildResult } from "../build/buildOutput";
 import { configSnapshot, applyConfig, listTargets } from "../build/configQuery";
 import { runStatus, launchRunTarget, forceCloseRuntime } from "../build/runQuery";
@@ -228,26 +236,9 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       const targets = args.targets ?? opts.buildOptions.targets;
       const job = startBuildJob({ generator: opts.buildOptions.generator, config, targets, coreCount: opts.buildOptions.coreCount });
 
-      // Block until done, streaming progress heartbeats if the client gave us a
-      // token (keeps the SSE connection alive + resets the client timeout). With a
-      // token we hold up to MAX_BLOCK_MS; without one, only a short safe window.
-      const progressToken = extra?._meta?.progressToken;
-      const maxWaitMs = progressToken !== undefined ? MAX_BLOCK_MS : INLINE_WAIT_MS;
+      // Block until done, streaming progress heartbeats if the client gave us a token (see holdUntilDone).
       const started = Date.now();
-      let step = 0;
-      while (!job.result && Date.now() - started < maxWaitMs && !extra?.signal?.aborted) {
-        await delay(progressToken !== undefined ? HEARTBEAT_MS : 500);
-        if (progressToken !== undefined && !job.result) {
-          step += 1;
-          const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
-          await extra
-            .sendNotification({
-              method: "notifications/progress",
-              params: { progressToken, progress: step, message: `Building ${config}… ${elapsed}s elapsed` },
-            })
-            .catch(() => undefined); // client not listening — ignore
-        }
-      }
+      await holdUntilDone(extra, job, (elapsed) => `Building ${config}… ${elapsed}s elapsed`);
 
       if (job.result) {
         return buildResultContent(job.result); // finished — return the full result inline
@@ -323,6 +314,89 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         };
       }
       return buildResultContent(job.result);
+    },
+  );
+
+  // ---- Configure: headless configure + status, and stopping jobs ----------
+  server.registerTool(
+    "o3de_configure",
+    {
+      title: "O3DE Configure",
+      description:
+        "Run the CMake configure for the workspace project (the same as the O3DE panel's Configure) with the selected " +
+        "generator and compiler, passing the Advanced tab's CMake flags (see o3de_get_config cmakeFlags). Needed on first " +
+        "setup, after changing CMake flags or build files, or when o3de_build reports blocked:not-configured. Never prompts: " +
+        "if the build tree was configured with a different generator it returns blocked:generator-mismatch instead of " +
+        "clearing the CMake cache (ask the user). Refuses while a build or configure runs (blocked:busy). BLOCKS until done " +
+        "with progress streamed; a very long first configure (3rd-party downloads) returns a configureId with " +
+        "state:running — poll o3de_configure_status. The result is also written to <project>/user/o3de-configure-result.json.",
+      inputSchema: {},
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async (_args, extra) => {
+      const job = startConfigureJob({ generator: opts.buildOptions.generator, compiler: opts.buildOptions.compiler });
+      await holdUntilDone(extra, job, (elapsed) => `Configuring… ${elapsed}s elapsed`);
+      if (job.result) {
+        return configureResultContent(job.result);
+      }
+      const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+      return {
+        content: [
+          txt(
+            `Configure started — id ${job.configureId}, still running after ${elapsed}s (normal when 3rd-party packages download). ` +
+              "Poll o3de_configure_status until state:done.",
+          ),
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "o3de_configure_status",
+    {
+      title: "O3DE Configure Status",
+      description:
+        "Whether the most recent configure started by o3de_configure is still running, and its full result once done: " +
+        "pass/fail, CMake errors and warnings, the exact cmake command, and the tail of its output.",
+      inputSchema: { configureId: z.string().optional().describe("Omit for the latest configure.") },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async (args: { configureId?: string }) => {
+      const job = getConfigureJob(args.configureId);
+      if (!job) {
+        return { content: [txt("No configure has been started through MCP this session.")] };
+      }
+      if (!job.result) {
+        const elapsed = Math.round((Date.now() - job.startedAt) / 1000);
+        return { content: [txt(`Configure ${job.configureId} is still running (${elapsed}s).`)] };
+      }
+      return configureResultContent(job.result);
+    },
+  );
+
+  server.registerTool(
+    "o3de_stop",
+    {
+      title: "O3DE Stop Build or Configure",
+      description:
+        "Stop the running build or configure for the workspace project, killing its whole process tree — the panel's Stop " +
+        "button. It stops the job whoever started it (the user, o3de_build or o3de_configure), so ask the user before " +
+        "stopping one they started.",
+      inputSchema: { job: z.enum(["build", "configure"]).describe("Which job to stop.") },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: { job: "build" | "configure" }) => {
+      const project = firstWorkspaceProject();
+      if (!project) {
+        return { content: [txt("No O3DE project in this workspace.")], isError: true };
+      }
+      const key = args.job === "build" ? buildJobKey(project.path) : configureJobKey(project.path);
+      if (!managedJob(key)) {
+        return { content: [txt(`No ${args.job} is running for ${project.projectName}.`), txt(JSON.stringify({ stopped: false }, null, 2))] };
+      }
+      const stopped = await cancelManagedCommand(key);
+      const line = stopped ? `Stopped the ${args.job} for ${project.projectName}.` : `Could not stop the ${args.job}.`;
+      return { content: [txt(line), txt(JSON.stringify({ stopped }, null, 2))] };
     },
   );
 
@@ -424,8 +498,10 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       title: "O3DE Get Config",
       description:
         "Read the current O3DE build options — generator, compiler, build config, selected targets, run target, " +
-        "launch args — plus the valid choices for each and the resolved project + build directory. Use this before " +
-        "o3de_set_config or o3de_build to see the current state and what's allowed.",
+        "launch args, parallel core count — plus the valid choices for each and the resolved project + build directory. " +
+        "cmakeFlags lists the Advanced tab's extra CMake cache variables, each with its stored value, what CMakeCache.txt " +
+        "holds, and whether it's applied; cmakeFlags.pending true means o3de_configure is needed for them to take effect. " +
+        "Use this before o3de_set_config, o3de_configure or o3de_build.",
       inputSchema: {},
     },
     async () => {
@@ -441,8 +517,10 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       title: "O3DE Set Config",
       description:
         "Change one or more O3DE build options (the same state the panel shows and that o3de_build/o3de_run use). " +
-        "Only the fields you pass change; others are left alone. Returns the updated config. Note: changing the " +
-        "generator usually requires re-running “O3DE: Configure Project” before the next build.",
+        "Only the fields you pass change; others are left alone. Returns the updated config. cmakeFlags edits the Advanced " +
+        "tab's CMake cache variables for the project (a value sets one; an empty string or null removes it; unlisted flags " +
+        "are kept) — they take effect on the next o3de_configure. Changing the generator also needs o3de_configure before " +
+        "the next build.",
       inputSchema: {
         generator: z.enum(["Ninja Multi-Config", "Visual Studio 17 2022"]).optional(),
         compiler: z.enum(["MSVC", "Clang"]).optional(),
@@ -458,12 +536,23 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
             "'Editor', 'GameLauncher', or any executable CMake target name (see o3de_list_targets executables).",
           ),
         launchArgs: z.string().optional().describe("Extra args passed when running (blank to clear)."),
+        coreCount: z.number().int().min(0).optional().describe("Parallel build jobs; 0 = let the generator decide."),
+        cmakeFlags: z
+          .record(z.string(), z.string().nullable())
+          .optional()
+          .describe('CMake cache variables, e.g. {"LY_RENDERDOC_ENABLED": "ON"}; an empty string or null removes one.'),
       },
     },
     async (args) => {
-      const applied = await applyConfig(opts.buildOptions, args);
+      let applied: string[];
+      try {
+        applied = await applyConfig(opts.buildOptions, args);
+      } catch (err) {
+        return { content: [txt(`Not changed: ${(err as Error).message}`)], isError: true };
+      }
       const snap = configSnapshot(opts.buildOptions);
-      const line = applied.length ? `Updated: ${applied.join(", ")}.` : "No changes — no fields provided.";
+      const pending = snap.cmakeFlags?.pending ? " CMake flags aren't applied yet — run o3de_configure for them to take effect." : "";
+      const line = applied.length ? `Updated: ${applied.join(", ")}.${pending}` : "No changes — no fields provided.";
       return { content: [txt(line), txt(JSON.stringify(snap, null, 2))] };
     },
   );
@@ -569,6 +658,49 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
   );
 
   return server;
+}
+
+type CallExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+
+/** A background job an MCP call can wait on (build and configure jobs both fit). */
+interface WaitableJob {
+  startedAt: number;
+  result?: unknown; // set when finished
+  done: Promise<unknown>;
+}
+
+/**
+ * Hold a tool call open until the job finishes. With a client progress token, up to MAX_BLOCK_MS, sending a progress
+ * heartbeat every HEARTBEAT_MS (resets the client's timeout, keeps proxies from idling out the stream). Without one,
+ * only INLINE_WAIT_MS — the caller then hands back an id to poll. Returns as soon as the job finishes.
+ */
+async function holdUntilDone(extra: CallExtra, job: WaitableJob, progressMessage: (elapsedSeconds: number) => string): Promise<void> {
+  const progressToken = extra?._meta?.progressToken;
+  const maxWaitMs = progressToken !== undefined ? MAX_BLOCK_MS : INLINE_WAIT_MS;
+  const isDone = (): boolean => job.result !== undefined;
+  const started = Date.now();
+  let step = 0;
+  while (!isDone() && Date.now() - started < maxWaitMs && !extra?.signal?.aborted) {
+    await Promise.race([delay(progressToken !== undefined ? HEARTBEAT_MS : 500), job.done]);
+    if (progressToken !== undefined && !isDone()) {
+      step += 1;
+      await extra
+        .sendNotification({
+          method: "notifications/progress",
+          params: { progressToken, progress: step, message: progressMessage(Math.round((Date.now() - job.startedAt) / 1000)) },
+        })
+        .catch(() => undefined); // client not listening — ignore
+    }
+  }
+}
+
+/** Shape a finished ConfigureResult into the tool response (summary line + full JSON). */
+function configureResultContent(result: ConfigureResult): { content: { type: "text"; text: string }[]; isError: boolean } {
+  const headline = result.blocked ? `${result.summary} (blocked: ${result.blocked})` : result.summary;
+  return {
+    content: [txt(headline), txt(JSON.stringify(result, null, 2))],
+    isError: result.blocked !== undefined, // a configure that ran and failed is a valid result (errors listed)
+  };
 }
 
 /** A text content block (keeps the tool handlers terse). */

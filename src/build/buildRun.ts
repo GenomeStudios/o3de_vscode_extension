@@ -24,12 +24,15 @@ import { Compiler, defaultCompiler } from "./buildOptions";
 import { readProject, O3deProject } from "../o3de/identity";
 import { projectBuildDir, formatCommand } from "./configureCommand";
 import { buildBuildArgs } from "./buildCommand";
-import { isConfiguredFor, configureJobKey } from "./configure";
+import { isConfiguredFor } from "./configure";
+import { buildJobKey, configureJobKey } from "./jobKeys";
 import { runningGuardedProcesses, guardEditorProcesses } from "./processGuard";
 import { managedJob, runManagedCommand, describeResult } from "./managedCommand";
+import { commandOutput } from "./commandOutput";
 import {
   BuildBlockedReason,
   BuildResult,
+  buildConclusion,
   parseBuildOutput,
   summarize,
   summarizeCancelled,
@@ -65,14 +68,23 @@ export interface HeadlessBuildParams {
   project?: O3deProject;
 }
 
-/** The registry key for a project's build — one build per project. */
-export function buildJobKey(projectPath: string): string {
-  return `build:${projectPath}`;
-}
+export { buildJobKey } from "./jobKeys"; // one build per project
 
 // ---- Public entry ----------------------------------------------------------
-/** Run the build for the given params, returning a structured result. */
+/**
+ * Run the build for the given params, returning a structured result. Whatever the outcome — ran,
+ * failed, stopped, or blocked before starting — its conclusion is printed into “O3DE Build Output”
+ * before this returns, so the channel always says how the build ended.
+ */
 export async function runBuildHeadless(params: HeadlessBuildParams): Promise<BuildResult> {
+  const result = await runBuild(params);
+  for (const line of buildConclusion(result)) {
+    commandOutput().appendLine(line);
+  }
+  return result;
+}
+
+async function runBuild(params: HeadlessBuildParams): Promise<BuildResult> {
   const targets = params.targets ?? [];
 
   const blocked = (reason: BuildBlockedReason, summary: string, command = ""): BuildResult => ({

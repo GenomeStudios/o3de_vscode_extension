@@ -21,14 +21,17 @@ import * as os from "os";
 import * as path from "path";
 import { log } from "../log";
 import { commandOutput } from "./commandOutput";
+import { BuildDiagnostic, diagnosticConclusion, parseBuildOutput, tailLines } from "./buildOutput";
+import { readCmakeFlags } from "./configureArgs";
+import { buildJobKey, configureJobKey } from "./jobKeys";
 import { runManagedCommand, describeResult, cancelManagedCommand, managedJob } from "./managedCommand";
 import { ensureNinja } from "./ninjaGuard";
 import { resolveBuildEnvironment } from "./toolchain";
 import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 import { readManifest } from "../o3de/manifest";
 import { O3deProject } from "../o3de/identity";
-import { BuildOptions } from "./buildOptions";
-import { resolveWorkspaceProject } from "./projectResolve";
+import { BuildOptions, Compiler, Generator } from "./buildOptions";
+import { firstWorkspaceProject, resolveWorkspaceProject } from "./projectResolve";
 import {
   buildConfigureArgs,
   formatCommand,
@@ -58,21 +61,6 @@ export function isConfiguredFor(project: O3deProject, generator: string): boolea
   return readCachedGenerator(projectBuildDir(project.path)) === generator;
 }
 
-// ---- Advanced-tab extra CMake cache flags ----------------------------------
-/** The user's extra `-D` cache flags for a project (Advanced tab: o3de.cmake.configureArgs). */
-export function readConfigureArgs(projectPath: string): Record<string, string> {
-  const raw = vscode.workspace
-    .getConfiguration("o3de", vscode.Uri.file(projectPath))
-    .get<Record<string, unknown>>("cmake.configureArgs", {});
-  const args: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw ?? {})) {
-    if (key.trim() !== "" && value !== null && value !== undefined) {
-      args[key] = String(value);
-    }
-  }
-  return args;
-}
-
 // ---- File API query --------------------------------------------------------
 /** Ask CMake to emit a File API reply for this build tree at next configure. */
 function writeFileApiQuery(buildDir: string): void {
@@ -94,10 +82,7 @@ function clearCmakeCache(buildDir: string): void {
 }
 
 // ---- Job identity ----------------------------------------------------------
-/** The registry key for a project's configure — one configure per project. */
-export function configureJobKey(projectPath: string): string {
-  return `configure:${projectPath}`;
-}
+export { configureJobKey } from "./jobKeys"; // one configure per project
 
 /** Stop the running configure for the workspace's project. */
 export async function stopConfigure(): Promise<boolean> {
@@ -105,41 +90,185 @@ export async function stopConfigure(): Promise<boolean> {
   return project ? cancelManagedCommand(configureJobKey(project.path)) : false;
 }
 
+// ---- Headless core ---------------------------------------------------------
+//  The configure itself, with no prompts: the O3DE panel's Configure command and the
+//  MCP o3de_configure tool both run this. Whatever the outcome, its conclusion is printed
+//  into “O3DE Build Output” before it returns.
+
+export type ConfigureBlockedReason =
+  | "unsupported-platform"
+  | "no-project"
+  | "busy" // a configure or a build is already running for the project
+  | "no-toolchain"
+  | "no-ninja"
+  | "generator-mismatch"; // configured with another generator — CMake can't switch in place
+
+export interface ConfigureResult {
+  ok: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  command: string; // the exact cmake line ("" when it never started)
+  project?: string;
+  generator: string;
+  errors: BuildDiagnostic[];
+  warnings: BuildDiagnostic[];
+  summary: string;
+  rawTail: string;
+  cancelled?: boolean;
+  blocked?: ConfigureBlockedReason;
+}
+
+export interface HeadlessConfigureParams {
+  generator: Generator;
+  compiler: Compiler;
+  project?: O3deProject; // omitted → the first O3DE project in the workspace
+  interactive?: boolean; // the panel's command: Ninja detection may show its own messages
+}
+
+const RAW_TAIL_LINES = 100;
+
+export async function runConfigureHeadless(params: HeadlessConfigureParams): Promise<ConfigureResult> {
+  const result = await runConfigure(params);
+  const conclusion = result.blocked
+    ? [`=== Configure not started — ${result.summary} ===`]
+    : result.ok || result.cancelled
+      ? []
+      : diagnosticConclusion(false, result.errors, result.warnings); // the runner already printed the outcome line
+  for (const line of conclusion) {
+    commandOutput().appendLine(line);
+  }
+  return result;
+}
+
+async function runConfigure(params: HeadlessConfigureParams): Promise<ConfigureResult> {
+  const blocked = (reason: ConfigureBlockedReason, summary: string, project?: O3deProject): ConfigureResult => ({
+    ok: false,
+    exitCode: null,
+    durationMs: 0,
+    command: "",
+    project: project?.projectName,
+    generator: params.generator,
+    errors: [],
+    warnings: [],
+    summary,
+    rawTail: "",
+    blocked: reason,
+  });
+
+  if (!isPlatformToolsEnabled()) {
+    return blocked("unsupported-platform", platformDisabledMessage());
+  }
+  const project = params.project ?? firstWorkspaceProject();
+  if (!project) {
+    return blocked("no-project", "No O3DE project in this workspace — run “O3DE: Set Up Workspace…” first.");
+  }
+
+  // One configure per project, and never under a running build: both write the same build tree.
+  if (managedJob(configureJobKey(project.path))) {
+    return blocked("busy", `A configure is already running for ${project.projectName}.`, project);
+  }
+  if (managedJob(buildJobKey(project.path))) {
+    return blocked("busy", `A build is running for ${project.projectName} — wait for it or stop it, then configure.`, project);
+  }
+
+  const buildDir = projectBuildDir(project.path);
+  const cachedGenerator = readCachedGenerator(buildDir);
+  if (cachedGenerator && cachedGenerator !== params.generator) {
+    return blocked(
+      "generator-mismatch",
+      `${path.basename(buildDir)} was configured with "${cachedGenerator}", but "${params.generator}" is selected. CMake can't ` +
+        `switch generators in place: select "${cachedGenerator}" again, or run Configure from the O3DE panel, which offers to clear the CMake cache.`,
+      project,
+    );
+  }
+
+  // Toolchain prerequisites: the compiler environment (Windows MSVC / Linux gcc-clang) always; Ninja for the Ninja generator.
+  const toolchain = await resolveBuildEnvironment(params.compiler);
+  if (!toolchain.ok) {
+    log().error(`Configure aborted — ${toolchain.reason}`);
+    return blocked("no-toolchain", toolchain.reason ?? "Could not establish the compiler environment.", project);
+  }
+  if (params.generator === "Ninja Multi-Config" && !(await ensureNinja({ interactive: params.interactive === true }))) {
+    log().error("Configure aborted — Ninja generator selected but Ninja is not installed.");
+    return blocked("no-ninja", "The Ninja generator is selected but Ninja isn't installed.", project);
+  }
+
+  // LY_3RDPARTY_PATH from the manifest — same source as the generated settings.json.
+  const manifest = readManifest();
+  const thirdPartyPath = manifest?.defaultThirdPartyFolder ?? path.join(os.homedir(), ".o3de", "3rdParty");
+
+  // Request a File API reply so this configure yields the IntelliSense data
+  // layer's source (and the reply the Build step's guard reads back).
+  try {
+    writeFileApiQuery(buildDir);
+  } catch (err) {
+    log().warn(`Could not write CMake File API query: ${String(err)}`);
+  }
+
+  const argv = buildConfigureArgs({
+    projectPath: project.path,
+    buildDir,
+    generator: params.generator,
+    thirdPartyPath,
+    compiler: params.compiler,
+    extraCacheArgs: readCmakeFlags(project.path),
+  });
+  const command = formatCommand(argv);
+
+  const label = `Configure ${project.projectName}`;
+  log().info(`Configuring ${project.projectName} → ${buildDir}`);
+  log().info(`  ${command} (streaming to “O3DE Build Output”)`);
+
+  const run = await runManagedCommand({
+    key: configureJobKey(project.path),
+    kind: "configure",
+    label,
+    argv,
+    cwd: project.path, // the source dir; -B creates the build tree
+    env: { ...process.env, ...toolchain.env }, // Windows MSVC delta; empty on Linux
+  });
+  log().info(describeResult(label, run));
+
+  const { errors, warnings } = parseBuildOutput(run.output);
+  const ok = run.exitCode === 0 && !run.cancelled;
+  const seconds = (run.durationMs / 1000).toFixed(1);
+  return {
+    ok,
+    exitCode: run.exitCode,
+    durationMs: run.durationMs,
+    command,
+    project: project.projectName,
+    generator: params.generator,
+    errors,
+    warnings,
+    summary: run.cancelled
+      ? `Configure stopped by the user after ${seconds}s`
+      : ok
+        ? `Configure succeeded in ${seconds}s`
+        : `Configure FAILED — ${errors.length} error(s), ${warnings.length} warning(s) in ${seconds}s`,
+    rawTail: tailLines(run.output, RAW_TAIL_LINES),
+    cancelled: run.cancelled || undefined,
+  };
+}
+
 // ---- Command ---------------------------------------------------------------
-/** Run the CMake configure. Returns true when it completed successfully. */
+/** “O3DE: Configure Project” — confirm with the user, run the headless core, report. True when it succeeded. */
 export async function configureProject(options: BuildOptions): Promise<boolean> {
   if (!isPlatformToolsEnabled()) {
     void vscode.window.showInformationMessage(platformDisabledMessage());
     return false;
   }
-
   const project = await resolveWorkspaceProject("O3DE: Configure Project");
   if (!project) {
     return false;
   }
-
-  // One configure per project — a second request joins nothing, it just reports.
   if (managedJob(configureJobKey(project.path))) {
     void vscode.window.showInformationMessage("O3DE: a configure is already running for this project.");
     return false;
   }
 
-  // Toolchain prerequisites: the compiler environment (Windows MSVC / Linux
-  // gcc-clang) always; Ninja only for the Ninja generator.
-  const toolchain = await resolveBuildEnvironment(options.compiler);
-  if (!toolchain.ok) {
-    log().error(`Configure aborted — ${toolchain.reason}`);
-    void vscode.window.showErrorMessage(`O3DE: ${toolchain.reason}`);
-    return false;
-  }
-  if (options.generator === "Ninja Multi-Config" && !(await ensureNinja({ interactive: true }))) {
-    log().error("Configure aborted — Ninja generator selected but Ninja is not installed.");
-    return false;
-  }
-
+  // The prompts live here, never in the core: a generator switch clears the cache only with consent.
   const buildDir = projectBuildDir(project.path);
-
-  // Generator-consistency guard: CMake refuses to switch generators in place.
   const cachedGenerator = readCachedGenerator(buildDir);
   if (cachedGenerator && cachedGenerator !== options.generator) {
     const choice = await vscode.window.showWarningMessage(
@@ -163,53 +292,16 @@ export async function configureProject(options: BuildOptions): Promise<boolean> 
     }
   }
 
-  // LY_3RDPARTY_PATH from the manifest — same source as the generated settings.json.
-  const manifest = readManifest();
-  const thirdPartyPath =
-    manifest?.defaultThirdPartyFolder ?? path.join(os.homedir(), ".o3de", "3rdParty");
-
-  // Request a File API reply so this configure yields the IntelliSense data
-  // layer's source (and the reply the Build step's guard reads back).
-  try {
-    writeFileApiQuery(buildDir);
-  } catch (err) {
-    log().warn(`Could not write CMake File API query: ${String(err)}`);
+  const result = await runConfigureHeadless({ generator: options.generator, compiler: options.compiler, project, interactive: true });
+  if (result.blocked) {
+    void vscode.window.showErrorMessage(`O3DE: ${result.summary}`);
+    return false;
   }
-
-  const argv = buildConfigureArgs({
-    projectPath: project.path,
-    buildDir,
-    generator: options.generator,
-    thirdPartyPath,
-    compiler: options.compiler,
-    extraCacheArgs: readConfigureArgs(project.path),
-  });
-  const command = formatCommand(argv);
-
-  // The compiler environment resolved above (Windows MSVC delta; empty on Linux,
-  // where cmake inherits gcc/clang from the shell).
-  const env = toolchain.env;
-
-  const label = `Configure ${project.projectName}`;
-  log().info(`Configuring ${project.projectName} → ${buildDir}`);
-  log().info(`  ${command} (streaming to “O3DE Build Output”)`);
-
-  const result = await runManagedCommand({
-    key: configureJobKey(project.path),
-    kind: "configure",
-    label,
-    argv,
-    cwd: project.path, // the source dir; -B creates the build tree
-    env: { ...process.env, ...env },
-  });
-
-  log().info(describeResult(label, result));
-
   if (result.cancelled) {
     void vscode.window.showInformationMessage("O3DE: configure stopped.");
     return false;
   }
-  if (result.exitCode === 0) {
+  if (result.ok) {
     void vscode.window.showInformationMessage(`O3DE: ${project.projectName} configured (${options.generator}).`);
     return true;
   }

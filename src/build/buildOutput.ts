@@ -157,3 +157,53 @@ export function summarize(ok: boolean, errors: number, warnings: number, duratio
 export function summarizeCancelled(durationMs: number): string {
   return `Build stopped by the user after ${(durationMs / 1000).toFixed(1)}s — results are incomplete`;
 }
+
+// ---- Conclusion (printed into “O3DE Build Output”) -------------------------
+//  The runner already ends the stream with "=== Build X FAILED (exit 1) in 42s ===".
+//  These lines follow it: what went wrong, in the compiler's own format so each
+//  diagnostic stays a clickable file(line) link in the Output panel.
+
+const CONCLUSION_DIAGNOSTICS = 20;
+
+/** One diagnostic, printed the way compilers print it. */
+export function formatDiagnostic(diagnostic: BuildDiagnostic): string {
+  const position = diagnostic.line ? `(${diagnostic.line}${diagnostic.column ? `,${diagnostic.column}` : ""})` : "";
+  const where = diagnostic.file ? `${diagnostic.file}${position}: ` : "";
+  const code = diagnostic.code ? ` ${diagnostic.code}` : "";
+  return `${where}${diagnostic.severity}${code}: ${diagnostic.message}`;
+}
+
+/**
+ * What a ran process leaves in the channel after its outcome line: the error list for a failure,
+ * a warning count for a success, nothing for a user-stopped job (its outcome line already says so).
+ */
+export function diagnosticConclusion(
+  ok: boolean,
+  errors: BuildDiagnostic[],
+  warnings: BuildDiagnostic[],
+  limit = CONCLUSION_DIAGNOSTICS,
+): string[] {
+  if (ok) {
+    return warnings.length > 0 ? [`${warnings.length} warning(s).`] : [];
+  }
+  if (errors.length === 0) {
+    return ["No compiler, linker or CMake errors were recognised — the lines above show what stopped it."];
+  }
+  const shown = errors.slice(0, limit);
+  const lines = [`${errors.length} error(s), ${warnings.length} warning(s):`, ...shown.map((d) => `  ${formatDiagnostic(d)}`)];
+  if (errors.length > shown.length) {
+    lines.push(`  … and ${errors.length - shown.length} more error(s)`);
+  }
+  return lines;
+}
+
+/** The conclusion a build prints into the channel (blocked builds never ran, so they say why here). */
+export function buildConclusion(result: BuildResult): string[] {
+  if (result.blocked) {
+    return [`=== Build not started — ${result.summary} ===`];
+  }
+  if (result.cancelled) {
+    return [];
+  }
+  return diagnosticConclusion(result.ok, result.errors, result.warnings);
+}

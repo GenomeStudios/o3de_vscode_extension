@@ -15,6 +15,9 @@
 //      terminal used to provide.
 //    - SHAPED OUTPUT to a plain channel (outputStream.ts), while the full raw
 //      text is still accumulated for the diagnostic parsers.
+//    - A CONCLUSION in that channel before the job reports done: any spawn error,
+//      then one "=== <label> succeeded / FAILED / stopped ===" line. The outcome
+//      is readable where the output is, not only in a toast that disappears.
 //    - A change EVENT so the UI can show a running job (buildState.ts).
 //
 //  There is deliberately NO progress notification. The O3DE tab already carries
@@ -79,6 +82,8 @@ export interface ManagedCommandSpec {
   shell?: boolean;
   /** Echo the shaped stream to the output channel (default true). */
   echo?: boolean;
+  /** Where echoed lines go (default: the “O3DE Build Output” channel). Tests pass a collector. */
+  output?: Pick<vscode.OutputChannel, "appendLine">;
 }
 
 // Floor between change events. Progress is already throttled by the filter, but
@@ -123,7 +128,7 @@ export function startManagedCommand(spec: ManagedCommandSpec): ManagedJob {
   }
 
   const command = formatCommand(spec.argv);
-  const out = commandOutput();
+  const out = spec.output ?? commandOutput();
   const echo = spec.echo !== false;
   const filter = new OutputFilter();
   const startedAt = Date.now();
@@ -204,16 +209,22 @@ export function startManagedCommand(spec: ManagedCommandSpec): ManagedJob {
     if (extra) {
       raw += extra;
     }
-    const emission = filter.flush();
+    const result: CommandResult = { exitCode, output: raw, durationMs: Date.now() - startedAt, cancelled: job.cancelled };
+
+    // Conclude IN the channel before anyone hears the job is done: the last buffered
+    // lines, a spawn error if there was one, then the outcome line.
     if (echo) {
-      for (const line of emission.lines) {
+      for (const line of filter.flush().lines) {
         out.appendLine(line);
       }
+      for (const line of (extra ?? "").split("\n").filter((l) => l.trim() !== "")) {
+        out.appendLine(line);
+      }
+      out.appendLine(`=== ${describeResult(spec.label, result).replace(/\.$/, "")} ===`);
     }
-    const durationMs = Date.now() - startedAt;
     jobs.delete(spec.key);
     changed.fire();
-    resolveDone({ exitCode, output: raw, durationMs, cancelled: job.cancelled });
+    resolveDone(result);
   };
 
   child.on("error", (err) => {

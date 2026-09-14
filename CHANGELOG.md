@@ -3,6 +3,46 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — 2026-09-12
+
+### Added
+
+- **MCP control of configure and CMake flags** (#25). The LLM/MCP endpoint can now configure the
+  project and manage the Advanced tab's CMake flags, not just build:
+  - **`o3de_configure`** runs the project's CMake configure. It's the same as the panel's
+    Configure, but it never prompts. It refuses to run while a build or configure is running.
+    If the build tree was configured with a different generator, it reports that instead of
+    clearing the CMake cache. It streams progress while it runs; a very long first configure
+    hands back an id to check with **`o3de_configure_status`**. The result is also saved to
+    `<project>/user/o3de-configure-result.json`.
+  - **`o3de_stop`** stops a running build or configure, like the panel's Stop button.
+  - **`o3de_get_config`** now includes the parallel core count and the CMake flags. Each flag shows
+    its value, what the CMake cache holds, and whether it has been applied, plus whether a configure
+    is needed.
+  - **`o3de_set_config`** can now change the core count and the CMake flags. A value sets a flag;
+    an empty value removes it.
+
+### Changed
+
+- **Configure no longer starts while a build is running for the project.** Both write the same
+  build tree. Stop the build or wait for it to finish, then configure.
+
+### Fixed
+
+- **Builds and configures now say how they ended, in the O3DE Build Output channel.** Previously the
+  output simply stopped. The outcome appeared only in a notification that disappears, and in the
+  separate O3DE Development Tools log. Now every build, configure and Class Wizard run ends its
+  output with one line such as `=== Build GS_Play FAILED (exit 1) in 42.1s ===`, printed before it
+  reports finished. After that line:
+  - **A failed build** lists its errors (up to 20) in the compiler's own format, so each one is a
+    clickable `file(line)` link. A successful build with warnings shows the warning count.
+  - **A failed configure** lists the CMake errors it reported.
+  - **A build that couldn't start** says why, for example that the project isn't configured.
+    **A configure that couldn't start** says why, for example that the compiler environment or
+    Ninja is missing.
+  - **A process that couldn't be launched at all** now shows its error in the channel. Before, it
+    wasn't shown anywhere.
+
 ## [0.4.0] — 2026-09-13
 
 ### Added

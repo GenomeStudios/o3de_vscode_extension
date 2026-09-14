@@ -1,5 +1,14 @@
 import * as assert from "assert";
-import { parseBuildOutput, summarize, tailLines } from "../build/buildOutput";
+import {
+  BuildDiagnostic,
+  BuildResult,
+  buildConclusion,
+  diagnosticConclusion,
+  formatDiagnostic,
+  parseBuildOutput,
+  summarize,
+  tailLines,
+} from "../build/buildOutput";
 
 suite("buildOutput.parseBuildOutput", () => {
   test("MSVC compiler error with file(line): code + message", () => {
@@ -90,5 +99,72 @@ suite("buildOutput helpers", () => {
     const out = Array.from({ length: 200 }, (_, i) => `line ${i}`).join("\n");
     const tail = tailLines(out, 5);
     assert.strictEqual(tail, ["line 195", "line 196", "line 197", "line 198", "line 199"].join("\n"));
+  });
+});
+
+// ---- Conclusion printed into the output channel (#29) ----------------------------
+suite("buildOutput conclusion", () => {
+  const error = (message: string, line = 12): BuildDiagnostic => ({
+    severity: "error",
+    file: "D:/proj/Code/Foo.cpp",
+    line,
+    column: 5,
+    code: "C2065",
+    message,
+  });
+  const warning: BuildDiagnostic = { severity: "warning", file: "D:/proj/Code/Bar.cpp", line: 3, code: "C4189", message: "unused" };
+
+  test("a diagnostic prints in compiler format, so it stays a clickable file(line) link", () => {
+    assert.strictEqual(formatDiagnostic(error("'x': undeclared identifier")), "D:/proj/Code/Foo.cpp(12,5): error C2065: 'x': undeclared identifier");
+    assert.strictEqual(formatDiagnostic({ severity: "error", code: "CMake", message: "Could not find package" }), "error CMake: Could not find package");
+  });
+
+  test("a failure lists its errors under a count", () => {
+    const lines = diagnosticConclusion(false, [error("a"), error("b", 20)], [warning]);
+    assert.deepStrictEqual(lines, [
+      "2 error(s), 1 warning(s):",
+      "  D:/proj/Code/Foo.cpp(12,5): error C2065: a",
+      "  D:/proj/Code/Foo.cpp(20,5): error C2065: b",
+    ]);
+  });
+
+  test("a long error list is capped with a count of the rest", () => {
+    const errors = Array.from({ length: 25 }, (_, i) => error(`e${i}`, i + 1));
+    const lines = diagnosticConclusion(false, errors, [], 20);
+    assert.strictEqual(lines.length, 1 + 20 + 1);
+    assert.strictEqual(lines[lines.length - 1], "  … and 5 more error(s)");
+  });
+
+  test("a failure with no recognised errors still says where to look", () => {
+    assert.match(diagnosticConclusion(false, [], [])[0], /No compiler, linker or CMake errors were recognised/);
+  });
+
+  test("a success adds only a warning count, or nothing", () => {
+    assert.deepStrictEqual(diagnosticConclusion(true, [], [warning]), ["1 warning(s)."]);
+    assert.deepStrictEqual(diagnosticConclusion(true, [], []), []);
+  });
+
+  const result = (overrides: Partial<BuildResult>): BuildResult => ({
+    ok: false,
+    exitCode: 1,
+    durationMs: 1000,
+    command: "cmake --build",
+    targets: [],
+    config: "profile",
+    errors: [],
+    warnings: [],
+    summary: "Build FAILED",
+    rawTail: "",
+    ...overrides,
+  });
+
+  test("a build that never started says why", () => {
+    assert.deepStrictEqual(buildConclusion(result({ blocked: "not-configured", summary: "The project isn't configured." })), [
+      "=== Build not started — The project isn't configured. ===",
+    ]);
+  });
+
+  test("a stopped build adds nothing after the runner's outcome line", () => {
+    assert.deepStrictEqual(buildConclusion(result({ cancelled: true, errors: [error("partial")] })), []);
   });
 });

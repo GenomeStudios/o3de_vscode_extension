@@ -11,10 +11,9 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import * as fs from "fs";
-import * as path from "path";
 import { firstWorkspaceProject } from "../build/projectResolve";
-import { projectBuildDir, readCachedValue } from "../build/configureCommand";
+import { readCmakeCache, readCmakeFlags, writeCmakeFlags } from "../build/configureArgs";
+import { readCachedValue } from "../build/configureCommand";
 import { getNonce } from "./webviewUtil";
 
 // ---- Curated flags ---------------------------------------------------------
@@ -65,30 +64,17 @@ export class AdvancedViewProvider implements vscode.WebviewViewProvider {
   private subs: vscode.Disposable[] = [];
 
   // ---- Setting I/O (per project folder) ------------------------------------
-  private folder(): vscode.WorkspaceFolder | undefined {
-    const project = firstWorkspaceProject();
-    return project ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.path)) : undefined;
-  }
-
+  //  Shared with Configure and the MCP config tools (build/configureArgs.ts).
   private readArgs(): Record<string, string> {
     const project = firstWorkspaceProject();
-    const raw = vscode.workspace
-      .getConfiguration("o3de", project ? vscode.Uri.file(project.path) : undefined)
-      .get<Record<string, unknown>>("cmake.configureArgs", {});
-    const out: Record<string, string> = {};
-    for (const [key, value] of Object.entries(raw ?? {})) {
-      if (key.trim() !== "" && value !== null && value !== undefined) {
-        out[key] = String(value);
-      }
-    }
-    return out;
+    return project ? readCmakeFlags(project.path) : {};
   }
 
   private async writeArgs(args: Record<string, string>): Promise<void> {
-    const folder = this.folder();
-    await vscode.workspace
-      .getConfiguration("o3de", folder?.uri)
-      .update("cmake.configureArgs", args, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Workspace);
+    const project = firstWorkspaceProject();
+    if (project) {
+      await writeCmakeFlags(project.path, args);
+    }
   }
 
   // ---- Model (setting + CMakeCache) ----------------------------------------
@@ -98,13 +84,7 @@ export class AdvancedViewProvider implements vscode.WebviewViewProvider {
       return { hasProject: false, configured: false, curated: [], custom: [], pending: false };
     }
     const args = this.readArgs();
-    const cachePath = path.join(projectBuildDir(project.path), "CMakeCache.txt");
-    let cacheText = "";
-    try {
-      cacheText = fs.existsSync(cachePath) ? fs.readFileSync(cachePath, "utf8") : "";
-    } catch {
-      cacheText = "";
-    }
+    const cacheText = readCmakeCache(project.path) ?? "";
     const configured = cacheText !== "";
     const cachedFor = (key: string): string | undefined => (configured ? readCachedValue(cacheText, key) : undefined);
     // A flag is "applied" when the cache already holds its exact value.
