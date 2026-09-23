@@ -3,6 +3,13 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — YYYY-MM-DD
+
+### Added
+
+- **A Sponsor button** on the Marketplace listing and in the Extensions view, for anyone who
+  wants to support the extension's development.
+
 ## [0.4.0] — 2026-09-13
 
 ### Added
