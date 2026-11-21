@@ -43,6 +43,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - **A process that couldn't be launched at all** now shows its error in the channel. Before, it
     wasn't shown anywhere.
 
+## [0.4.1] — 2026-09-23
+
+### Added
+
+- **A Sponsor button** on the Marketplace listing and in the Extensions view, for anyone who
+  wants to support the extension's development.
+
 ## [0.4.0] — 2026-09-13
 
 ### Added

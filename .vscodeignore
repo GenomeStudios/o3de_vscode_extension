@@ -11,6 +11,7 @@ out/**
 node_modules/**
 .gitignore
 .git/**
+.github/**
 esbuild.js
 eslint.config.mjs
 tsconfig.json
