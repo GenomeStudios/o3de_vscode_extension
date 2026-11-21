@@ -27,7 +27,11 @@ function record(overrides: Partial<DatabaseRecord> = {}): DatabaseRecord {
     dir: DIR,
     file: `${DIR}\\compile_commands.json`,
     entries: 1759,
+    engineCoverage: "participating",
+    origins: { project: 100, gem: 394, engineFramework: 1265, engineGems: 0, fallback: 0 },
     engineEntries: 1265,
+    engineModuleDefines: 1100,
+    skippedManifestGems: 0,
     changed: true,
     durationMs: 270,
     ...overrides,
@@ -128,9 +132,44 @@ suite("clangdDatabase labels", () => {
     assert.strictEqual(databaseLabel({ state: "upToDate", last: record() }), "Up to date · 1,759 entries");
   });
 
+  const noEngine = { project: 100, gem: 394, engineFramework: 0, engineGems: 0, fallback: 0 };
+
   test("the detail names the engine entries when there are any", () => {
     assert.match(databaseDetail({ state: "upToDate", last: record() }), /1,265 engine Framework sources/);
-    assert.doesNotMatch(databaseDetail({ state: "upToDate", last: record({ engineEntries: 0 }) }), /engine Framework/);
+    const none = record({ engineEntries: 0, engineModuleDefines: 0, origins: noEngine });
+    assert.doesNotMatch(databaseDetail({ state: "upToDate", last: none }), /engine|outside the build/);
+  });
+
+  test("the detail names the engine gem sources next to the Framework ones", () => {
+    const withGems = record({ engineEntries: 1765, origins: { ...record().origins, engineGems: 500 } });
+    assert.match(databaseDetail({ state: "upToDate", last: withGems }), /1,265 engine Framework sources and 500 engine gem sources \(1,100 with their module's export defines\)/);
+    const gemsOnly = record({ engineEntries: 500, origins: { ...noEngine, engineGems: 500 } });
+    assert.match(databaseDetail({ state: "upToDate", last: gemsOnly }), /including 500 engine gem sources \(/);
+    assert.doesNotMatch(databaseDetail({ state: "upToDate", last: gemsOnly }), /engine Framework/);
+  });
+
+  test("the detail names the gem sources outside the build's targets (fallback), with or without engine sources", () => {
+    const withBoth = record({ origins: { ...record().origins, fallback: 12 } });
+    assert.match(databaseDetail({ state: "upToDate", last: withBoth }), / and 12 gem sources outside the build's targets\./);
+    const fallbackOnly = record({ engineEntries: 0, engineModuleDefines: 0, origins: { ...noEngine, fallback: 12 } });
+    assert.match(databaseDetail({ state: "upToDate", last: fallbackOnly }), /including 12 gem sources outside the build's targets\./);
+  });
+
+  test("the detail says how many engine entries carry their module's export defines", () => {
+    assert.match(databaseDetail({ state: "upToDate", last: record() }), /\(1,100 with their module's export defines\)/);
+    assert.match(databaseDetail({ state: "upToDate", last: record({ engineModuleDefines: 0 }) }), /\(0 with their module's export defines\)/);
+  });
+
+  test("the detail says how many registered gems were left out as none of this project's, and says nothing when none were", () => {
+    assert.doesNotMatch(databaseDetail({ state: "upToDate", last: record() }), /registered in the O3DE manifest/);
+    assert.match(
+      databaseDetail({ state: "upToDate", last: record({ skippedManifestGems: 1 }) }),
+      /1 gem registered in the O3DE manifest was left out: the project doesn't enable it and the workspace doesn't contain it\./,
+    );
+    assert.match(
+      databaseDetail({ state: "upToDate", last: record({ skippedManifestGems: 1200 }) }),
+      /1,200 gems registered in the O3DE manifest were left out: the project doesn't enable them and the workspace doesn't contain them\./,
+    );
   });
 
   test("a configure without the selected config says whose flags stand in (SDK engines ship profile only)", () => {
@@ -145,7 +184,7 @@ suite("clangdDatabase labels", () => {
   });
 
   test("every state has a label and a detail", () => {
-    for (const state of ["notInUse", "upToDate", "updatePending", "notConfigured", "noProject"] as const) {
+    for (const state of ["notInUse", "upToDate", "updatePending", "notConfigured", "noProject", "userProvided"] as const) {
       assert.ok(databaseLabel({ state }).length > 0, state);
       assert.ok(databaseDetail({ state }).length > 0, state);
     }

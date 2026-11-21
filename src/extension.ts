@@ -48,6 +48,7 @@ import { showEngineMode } from "./intellisense/engineMode";
 import { IntelliSenseStatus, showCppDataStatus, showLuaReflectionStatus } from "./intellisense/intellisenseStatus";
 import { selectIntelliSenseEngine } from "./intellisense/clangdMode";
 import { ClangdDatabaseSync, showClangdDatabaseStatus } from "./intellisense/clangdSync";
+import { healthEnvironment, showIntellisenseHealth } from "./intellisense/healthQuery";
 import { registerLuaDebug, debugLuaFile } from "./lua/debug/debugAdapter";
 import { registerLuaHandoff } from "./lua/handoff";
 import { generateLuaIntelliSense, generateLuaStubsFromDump } from "./lua/intellisense/intelliSense";
@@ -473,6 +474,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const showClangdDatabaseStatusCmd = vscode.commands.registerCommand("o3de.showClangdDatabaseStatus", () => {
     void showClangdDatabaseStatus(buildOptions, intellisenseStatus);
   });
+  // Command: run clangd --check on a sample of the project's files and open what failed as a shareable Markdown report.
+  const checkIntelliSenseHealthCmd = vscode.commands.registerCommand("o3de.checkIntelliSenseHealth", () => {
+    void showIntellisenseHealth(buildOptions, healthEnvironment(context));
+  });
 
   // Commands: choose the CMake generator / build config (shown in the tab, persisted).
   const selectGenerator = vscode.commands.registerCommand("o3de.selectGenerator", async () => {
@@ -661,6 +666,7 @@ export function activate(context: vscode.ExtensionContext): void {
     selectIntelliSenseEngineCmd,
     clangdDatabaseSync,
     showClangdDatabaseStatusCmd,
+    checkIntelliSenseHealthCmd,
     selectGenerator,
     selectConfig,
     selectCompiler,

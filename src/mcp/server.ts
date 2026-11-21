@@ -12,6 +12,7 @@
 
 import * as vscode from "vscode";
 import * as crypto from "crypto";
+import * as path from "path";
 import { log } from "../log";
 import { BuildOptions } from "../build/buildOptions";
 import { readProject } from "../o3de/identity";
@@ -98,6 +99,7 @@ export class O3deMcpServer {
         version,
         buildOptions: this.buildOptions,
         workspaceState: this.context.workspaceState,
+        globalStorageRoot: path.dirname(this.context.globalStorageUri.fsPath),
       });
       livePort = this.handle.port; // publish the actual bound port (for the Optional row / status)
       this.writeClientConfig(); // keep the project's .mcp.json in sync with the live port

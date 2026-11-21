@@ -16,6 +16,7 @@
 //    a Lua dump was written                 watcher: user/lua_symbols.json
 //    the running C++ engine changed         C_Cpp.intelliSenseEngine / clangd.enable /
 //                                           clangd.arguments settings, installed extensions
+//    the compile database choice changed    o3de.intellisense.compileDatabase
 //    clangd's compile database generated    onDidGenerateDatabase
 // ============================================================================
 
@@ -106,7 +107,8 @@ export class IntelliSenseStatus implements vscode.Disposable {
         if (
           e.affectsConfiguration("C_Cpp.intelliSenseEngine") ||
           e.affectsConfiguration("clangd.enable") ||
-          e.affectsConfiguration("clangd.arguments")
+          e.affectsConfiguration("clangd.arguments") ||
+          e.affectsConfiguration("o3de.intellisense.compileDatabase") // the user's own compile database chosen or dropped
         ) {
           this.schedule();
         }

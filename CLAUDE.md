@@ -39,8 +39,9 @@ version anywhere in `src/`.**
 
 `publish.bat` (Windows): clean-tree check → confirm → bump menu (**P** patch /
 **N** minor / **M** major / **S** skip = publish current version as-is) → stamp
-changelog → package one `.vsix` → publish to VS Code Marketplace + Open VSX. Full
-details in `PUBLISHING.md`.
+changelog → package one `.vsix` → commit `package.json`, `package-lock.json` and
+`CHANGELOG.md` as `<version>` (not pushed, not tagged) → publish to VS Code
+Marketplace + Open VSX. Full details in `PUBLISHING.md`.
 
 ## MCP parity: every feature gets MCP equivalents
 

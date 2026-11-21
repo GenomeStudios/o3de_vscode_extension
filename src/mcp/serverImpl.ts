@@ -13,8 +13,9 @@
 //  (o3de_configure + _status), o3de_stop, run (o3de_is_running, o3de_run, o3de_run_debug, o3de_read_run_log),
 //  config (o3de_get/set_config incl. CMake flags + launch-args history + the Visual Studio selection,
 //  o3de_list_targets), Visual Studio (o3de_visual_studio_status),
-//  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine,
-//  o3de_update_clangd_database).
+//  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine, which also takes the user's own
+//  compile database, o3de_update_clangd_database, and o3de_intellisense_health, which runs clangd --check on a
+//  sample of files and streams progress while it does).
 // ============================================================================
 
 import * as http from "http";
@@ -51,6 +52,11 @@ import {
 import { MAX_TAIL_LINES } from "../build/runLog";
 import { intellisenseReport, setIntelliSenseEngine, updateClangdDatabase } from "../intellisense/intellisenseQuery";
 import { syncMessage } from "../intellisense/clangdSync";
+import type { OriginCounts } from "../intellisense/databasePlan";
+import { startHealthCheck } from "../intellisense/healthQuery";
+import { DEFAULT_SAMPLE_SIZE, INLINE_BUDGET_MS, MAX_ENTRYLESS, MAX_SAMPLE_SIZE, MIN_SAMPLE_SIZE, TOTAL_BUDGET_MS } from "../intellisense/healthModel";
+import { healthSummaryLine } from "../intellisense/healthReport";
+import type { DatabaseSelection } from "../intellisense/userDatabase";
 import type { Memento } from "vscode";
 
 const MCP_PATH = "/mcp";
@@ -75,6 +81,7 @@ export interface McpHttpOptions {
   version: string;
   buildOptions: BuildOptions;
   workspaceState: Memento; // per-workspace store (the IntelliSense engine switch records prior settings here)
+  globalStorageRoot?: string; // the folder holding every extension's global storage (where the clangd extension downloads clangd)
 }
 
 export interface McpHttpHandle {
@@ -818,7 +825,19 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         "extension, clangd installed — O3DE then switches clangd on automatically, once per workspace); whether the C/C++ and " +
         "clangd extensions are installed (with versions, and whether clangd's language server has been downloaded); " +
         "while clangd uses O3DE's compile database, whether that database is current (clangdDatabase: upToDate / " +
-        "updatePending / notConfigured / noProject, with entry counts; notInUse otherwise); " +
+        "updatePending / notConfigured / noProject, with entry counts by origin in last.origins — project, gem, " +
+        "engineFramework, engineGems (the engine gems the project uses) and fallback (gem sources no configured target " +
+        "lists) — last.engineEntries engine sources, of which last.engineModuleDefines carry their module's export " +
+        "defines, last.engineCoverage, and last.skippedManifestGems (gems registered in the o3de manifest that the project " +
+        "neither enables nor the workspace contains, so they are left out); last is this session's most recent generation " +
+        "and says nothing about the user's own database when the state is userProvided; notInUse otherwise); which " +
+        "compile database is selected and why " +
+        "(clangdDatabase.selection: source 'generated' = O3DE generates it, or 'user' = the user's own compile_commands.json " +
+        "named by the o3de.intellisense.compileDatabase setting, which O3DE never writes — state userProvided once clangd " +
+        "reads it; selection.missing when the setting names nothing usable, so O3DE falls back to generating; " +
+        "selection.hint when the setting is empty but a compile_commands.json exists in the project or its build folder, " +
+        "which O3DE never switches to by itself); engineCoverage, the o3de.intellisense.engineCoverage " +
+        "setting (participating / framework / off) that decides how much engine source the generated database holds; " +
         "how far navigation reaches into engine code (engineSources: native / redirected / headersOnly / unresolved); " +
         "whether C++ data is stale and needs a reconfigure (cppData); and whether Lua reflection is stale (luaReflection).",
       inputSchema: {},
@@ -831,7 +850,8 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         `C/C++ ${report.extensions.cppTools.installed ? "installed" : "not installed"} · ` +
         `clangd ${report.extensions.clangd.installed ? (report.extensions.clangd.server.found ? "installed" : "installed, server not found") : "not installed"} · ` +
         (report.clangdDatabase.state === "notInUse" ? "" : `clangd database: ${report.clangdDatabase.label} · `) +
-        `Engine sources: ${report.engineSources.label} · C++ data: ${report.cppData.label} · Lua: ${report.luaReflection.label}`;
+        compileDatabaseLine(report.clangdDatabase.selection) +
+        `Engine sources: ${report.engineSources.label} (coverage ${report.engineCoverage.setting}) · C++ data: ${report.cppData.label} · Lua: ${report.luaReflection.label}`;
       return { content: [txt(line), txt(JSON.stringify(report, null, 2))] };
     },
   );
@@ -848,18 +868,42 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         "shuts clangd down. Writes WORKSPACE settings only and is reversible. Never installs an extension: a missing one " +
         "returns reason notInstalled (check o3de_intellisense_status first). When the result has reloadRequired:true, " +
         "tell the user to reload the window — the C/C++ extension only stops its IntelliSense after a reload. If " +
-        "clangd's language server hasn't been downloaded yet, clangd asks the user to download it.",
+        "clangd's language server hasn't been downloaded yet, clangd asks the user to download it. " +
+        "compileDatabase brings the user's own compile database: a compile_commands.json, or the folder holding one " +
+        "(absolute, or relative to the project), stored as the workspace-folder setting o3de.intellisense.compileDatabase " +
+        "before the switch; '' removes the workspace-folder value (back to the generated database unless a User or Workspace " +
+        "value still applies: the result says which database is read). clangd is then pointed at the user's folder and O3DE " +
+        "never writes it (no generation, no sync, no engine coverage). A path with no compile_commands.json is not " +
+        "an error: the result's compileDatabase.missing says so and O3DE falls back to the generated database. The result's " +
+        "compileDatabase.source says which database clangd reads ('generated' or 'user') and why. Omit compileDatabase to " +
+        "leave the setting as it is. Changing the setting while clangd already runs on a database O3DE pointed it at " +
+        "re-points clangd by itself (only when clangd is the sole running engine), so calling this with the same engine " +
+        "'clangd' and a new compileDatabase also works. The setting stays stored even when the switch fails (for instance " +
+        "reason notConfigured): the failure result then carries settingWritten:true and the compileDatabase selection.",
       inputSchema: {
         engine: z.enum(["cpptools", "clangd"]).describe("'cpptools' = Microsoft C/C++ extension; 'clangd' = clangd."),
+        compileDatabase: z
+          .string()
+          .optional()
+          .describe(
+            "The user's own compile database: a compile_commands.json, or its folder (absolute, or relative to the project). " +
+              "'' removes the workspace-folder value (the generated database, unless a User or Workspace value still applies; " +
+              "the result says which database is read). Omit to leave the setting as it is.",
+          ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (args: { engine: "cpptools" | "clangd" }) => {
-      const result = await setIntelliSenseEngine(opts.buildOptions, opts.workspaceState, args.engine);
+    async (args: { engine: "cpptools" | "clangd"; compileDatabase?: string }) => {
+      const result = await setIntelliSenseEngine(opts.buildOptions, opts.workspaceState, args.engine, args.compileDatabase);
+      const databaseNote = compileDatabaseNote(result.compileDatabase); // on a failure too: the setting may be stored already
       const line = !result.ok
-        ? `Not switched (${result.reason}): ${result.message}`
-        : `IntelliSense engine set to ${result.engine}; running now: ${result.running}.` +
-          (result.database ? ` Compile database: ${result.database.entries} entries (${result.database.engineEntries} engine).` : "") +
+        ? `Not switched (${result.reason}): ${result.message}${databaseNote ? ` ${databaseNote}` : ""}`
+        :`IntelliSense engine set to ${result.engine}; running now: ${result.running}.` +
+          (result.database
+            ? ` Compile database: ${result.database.entries} entries (${originsLine(result.database.origins)}; ` +
+              `${result.database.engineModuleDefines} engine with module export defines; engine coverage ${result.database.engineCoverage}).`
+            : "") +
+          (databaseNote ? ` ${databaseNote}` : "") +
           (result.reloadRequired ? " Reload the window to stop the C/C++ extension's IntelliSense." : "");
       return { content: [txt(line), txt(JSON.stringify(result, null, 2))], isError: !result.ok };
     },
@@ -875,18 +919,116 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         "and at startup — call this only when o3de_intellisense_status reports clangdDatabase updatePending, or after " +
         "changing engine sources the configure doesn't track. Only acts while clangd uses O3DE's database (ran:false " +
         "otherwise). clangd restarts only when the content changed. A source file added in CMake needs a reconfigure " +
-        "first — this tool doesn't configure.",
-      inputSchema: {},
+        "first — this tool doesn't configure. engineCoverage overrides the o3de.intellisense.engineCoverage setting " +
+        "for this one run: 'participating' (engine Framework + the engine gems the project uses), 'framework' " +
+        "(Framework only) or 'off' (no engine sources); the next automatic update goes back to the setting. The " +
+        "result's generation.origins counts the entries by origin. While clangd reads the user's own compile database " +
+        "(o3de.intellisense.compileDatabase) this tool does nothing: ran:false, reason userDatabase — O3DE never writes it.",
+      inputSchema: {
+        engineCoverage: z
+          .enum(["participating", "framework", "off"])
+          .optional()
+          .describe("Override the engine coverage setting for this run only; omit to use the setting."),
+      },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async () => {
-      const outcome = await updateClangdDatabase(opts.buildOptions);
+    async (args: { engineCoverage?: "participating" | "framework" | "off" }) => {
+      const outcome = await updateClangdDatabase(opts.buildOptions, args.engineCoverage);
       const failed = outcome.ran && !outcome.generation.ok;
       return { content: [txt(syncMessage(outcome)), txt(JSON.stringify(outcome, null, 2))], isError: failed };
     },
   );
 
+  // ---- IntelliSense health: does clangd understand the project's own files? ----
+  server.registerTool(
+    "o3de_intellisense_health",
+    {
+      title: "O3DE IntelliSense Health Check",
+      description:
+        "Check whether clangd actually understands this project's C++ files, on this machine: the same check as the " +
+        "command O3DE: Check IntelliSense Health. It samples files from the compile database clangd reads (O3DE's generated " +
+        "one, or the user's own; whichever clangd.arguments names) - spread over the project, gem, engine Framework, engine " +
+        "gem and fallback entries, the same files every time - plus up to " + MAX_ENTRYLESS + " sources the database has NO entry " +
+        "for (includeEntryless), and runs `clangd --check` on each (two at a time, 60 s per file). Read-only: it builds " +
+        "no index and writes nothing. Returns report.summary and report.findings (plain sentences: what is wrong, what to do), " +
+        "the extension and clangd versions, report.clangd (binary, version, where it was found), report.toolchain " +
+        "(compiler and msvc/gnu switch style), report.database (file, whose it is, entries by origin, whether clangd.arguments " +
+        "points at it, and how many include directories the entries name that do not exist on disk), report.engine " +
+        "(native / redirected / headersOnly, with a hint to attach a source engine for headersOnly) and report.files: per " +
+        "sampled file its origin (or noEntry), errors (real compile errors only, never clangd's refactoring-tweak noise), the " +
+        "first error lines, and whether clangd used the file's own entry or inferred flags from another file (command, " +
+        "inferredFrom). A clean sample with entries means IntelliSense works; errors on files with an entry mean a missing " +
+        "include path or define; files with command:inferred have no entry at all. Takes up to ~5 minutes with a client that " +
+        "sends a progress token (progress is streamed); a client without one gets a partial result after ~45 s " +
+        "(report.partial lists the files skipped) - ask for a smaller sampleSize then. With no O3DE project open it refuses at " +
+        "once (isError, reason noProject). clangd not found or no database is not an error: it is reported in report.findings.",
+      inputSchema: {
+        sampleSize: z
+          .number()
+          .int()
+          .min(MIN_SAMPLE_SIZE)
+          .max(MAX_SAMPLE_SIZE)
+          .optional()
+          .describe(`How many files from the database to check, ${MIN_SAMPLE_SIZE}-${MAX_SAMPLE_SIZE} (default ${DEFAULT_SAMPLE_SIZE}).`),
+        includeEntryless: z
+          .boolean()
+          .optional()
+          .describe(`Also check up to ${MAX_ENTRYLESS} sources the database has no entry for (default true).`),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    (args: { sampleSize?: number; includeEntryless?: boolean }, extra) => runIntellisenseHealthTool(args, extra, opts),
+  );
+
   return server;
+}
+
+// ---- The health tool's handler ---------------------------------------------
+/** What the health tool reads from the server's options. */
+type HealthToolOptions = Pick<McpHttpOptions, "buildOptions" | "version" | "globalStorageRoot">;
+
+/**
+ * The body of o3de_intellisense_health. A client with a progress token is kept alive by heartbeats for the full budget
+ * (TOTAL_BUDGET_MS); one without cannot be held long, so its check gets INLINE_BUDGET_MS. An unexpected failure of the
+ * check comes back as an isError result carrying its message, never as a rejected call. Exported for the progress test,
+ * which injects `start` and shortens the heartbeat.
+ */
+export async function runIntellisenseHealthTool(
+  args: { sampleSize?: number; includeEntryless?: boolean },
+  extra: CallExtra,
+  opts: HealthToolOptions,
+  start: typeof startHealthCheck = startHealthCheck,
+  heartbeatMs = HEARTBEAT_MS,
+): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
+  const canStream = extra?._meta?.progressToken !== undefined;
+  try {
+    const run = start(
+      opts.buildOptions,
+      { extensionVersion: opts.version, globalStorageRoot: opts.globalStorageRoot },
+      {
+        sampleSize: args.sampleSize,
+        includeEntryless: args.includeEntryless,
+        maxTotalMs: canStream ? TOTAL_BUDGET_MS : INLINE_BUDGET_MS,
+        signal: extra?.signal,
+      },
+    );
+    await holdUntilDone(
+      extra,
+      run,
+      (elapsed) => `Checking IntelliSense health... ${run.progress.checked} of ${run.progress.total} files checked, ${elapsed}s elapsed`,
+      undefined,
+      heartbeatMs,
+    );
+    const outcome = await run.done; // without a progress token holdUntilDone returns early: the budget above bounds this wait
+    if (!outcome.ok) {
+      return { content: [txt(outcome.message), txt(JSON.stringify(outcome, null, 2))], isError: true };
+    }
+    return { content: [txt(healthSummaryLine(outcome.report)), txt(JSON.stringify(outcome, null, 2))] };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log().warn(`o3de_intellisense_health failed: ${message}`);
+    return { content: [txt(`The IntelliSense health check failed: ${message}`)], isError: true };
+  }
 }
 
 type CallExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -1027,6 +1169,34 @@ function runLogSummary(report: RunLogReport): string {
 /** A text content block (keeps the tool handlers terse). */
 function txt(text: string): { type: "text"; text: string } {
   return { type: "text", text };
+}
+
+/** "394 project, 100 gem, 1265 engine Framework, 165 engine gem, 12 fallback" — the entries by origin. */
+function originsLine(origins: OriginCounts): string {
+  return (
+    `${origins.project} project, ${origins.gem} gem, ${origins.engineFramework} engine Framework, ` +
+    `${origins.engineGems} engine gem, ${origins.fallback} fallback`
+  );
+}
+
+/** What is worth saying about which compile database is selected, as a sentence ("" for the plain default: O3DE generates it). */
+function compileDatabaseNote(selection: DatabaseSelection | undefined): string {
+  if (!selection) {
+    return "";
+  }
+  if (selection.source === "user") {
+    return `Using your own compile database, ${selection.file} (O3DE never writes it).`;
+  }
+  if (selection.missing) {
+    return `o3de.intellisense.compileDatabase "${selection.setting}" was not found, so the database is generated.`;
+  }
+  return selection.hint ? `A compile_commands.json exists at ${selection.hint} but isn't used: set o3de.intellisense.compileDatabase to use it.` : "";
+}
+
+/** The note as one more segment of the status line ("" when there is nothing to say). */
+function compileDatabaseLine(selection: DatabaseSelection | undefined): string {
+  const note = compileDatabaseNote(selection);
+  return note ? `${note} · ` : "";
 }
 
 /** Shape a finished BuildResult into the tool response (summary line + full JSON). */

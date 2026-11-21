@@ -1,0 +1,58 @@
+I[04:51:22.613] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)
+I[04:51:22.613] Features: windows+grpc
+I[04:51:22.613] PID: 19752
+I[04:51:22.613] Working directory: D:\ib\smoke
+I[04:51:22.613] argv[0]: C:\Users\user\AppData\Roaming\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\22.1.6\clangd_22.1.6\bin\clangd.exe
+I[04:51:22.613] argv[1]: --check=D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h
+I[04:51:22.613] argv[2]: --compile-commands-dir=D:/ib/scratch/variants/A-extension
+I[04:51:22.617] Entering check mode (no LSP server)
+I[04:51:22.617] Testing on source file D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+I[04:51:22.618] Loading compilation database...
+I[04:51:22.770] Loaded compilation database from D:/ib/scratch/variants/A-extension\compile_commands.json
+I[04:51:22.772] Compile command inferred from D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/Interfaces/Item/ItemComponentType.cpp is: [D:/OffLocalDev/gs_play/build/wind
+I[04:51:22.773] Parsing command...
+I[04:51:22.782] internal (cc1) args are: -cc1 -triple x86_64-pc-windows-msvc19.51.36260 -O3 -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -
+I[04:51:22.782] Building preamble...
+I[04:51:26.137] Built preamble of size 38984648 for file D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h version null in 3.35
+I[04:51:26.137] Indexing headers...
+I[04:51:26.754] Building AST...
+I[04:51:26.830] Indexing AST...
+I[04:51:26.831] Building inlay hints
+I[04:51:26.832] Building semantic highlighting
+I[04:51:26.832] Testing features at each token (may be slow in large files)
+E[04:51:26.839]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+E[04:51:26.840]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+E[04:51:26.841]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+E[04:51:26.842]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+I[04:51:26.850] Found definition heuristically using nearby identifier ItemComponentType
+I[04:51:26.852] Found definition heuristically using nearby identifier ItemComponentType
+E[04:51:26.859]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+E[04:51:26.869]     tweak: SwapBinaryOperands ==> FAIL: The new replacement overlaps with an existing replacement.
+New replacement: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h: 1714:+58:"=="
+Existing replacement: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h: 1714:+58:"AZ_CLASS_ALLOCATOR(ItemComponentType, AZ::Sy
+E[04:51:26.908] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.945] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.950] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.952] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.957] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.959] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.965] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.967] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.972] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.974] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.979] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.981] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.991] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.994] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.997] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:26.999] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.005] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.007] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.012] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.015] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.018] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.021] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.026] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.028] Failed to resolve URI : Scheme must be provided in URI: 
+E[04:51:27.034]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\Interfaces\Item\ItemComponentType.h
+I[04:51:27.036] All checks completed, 7 errors

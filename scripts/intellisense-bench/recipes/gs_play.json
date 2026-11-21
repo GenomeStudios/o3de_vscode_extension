@@ -1,0 +1,1215 @@
+{
+  "name": "gs_play",
+  "clangd": "C:/Users/gaian/AppData/Roaming/Code/User/globalStorage/llvm-vs-code-extensions.vscode-clangd/install/22.1.6/clangd_22.1.6/bin/clangd.exe",
+  "workDir": "D:/ib",
+  "project": "D:/OffLocalDev/gs_play",
+
+  "notes": "Probe set curated against the real gs_play DB (2366 entries). extraArgs is EMPTY on purpose: the only clangd.arguments the extension wrote (D:/OffLocalDev/gs_play/.vscode/gs_play.code-workspace, settings block) is --compile-commands-dir=D:\\OffLocalDev\\gs_play\\build\\windows\\clangd, and the harness supplies its own copy of that dir. D:/OffLocalDev/gs_play/.vscode/settings.json has no clangd.arguments, and neither does the user settings.json. No --query-driver is written for cl/clang-cl builds. The project part holds no C++ (all project C++ lives in its own gem), so probes use projectGem. Workspace gems = D:/OffLocalDev/gs_play_gems/<gem>/Code. gs_ai and gs_world are template stubs that are NOT in the DB (expectedBuilt false). VolumetricCloudsForO3DE is in the DB but under no part. Compare drive-letter case-insensitively (d:/ vs D:/ both appear in the DB). The nav stage uses nav.dbSubset so its index can finish; a full-DB gs_play index takes about 1.5 hours at jobs 4.",
+
+  "parts": {
+    "projectGem": ["D:/OffLocalDev/gs_play/Gem"],
+    "project": ["D:/OffLocalDev/gs_play"],
+    "workspaceGems": ["D:/OffLocalDev/gs_play_gems"],
+    "engineSource": ["d:/OffLocalDev/o3de_sourcedev"],
+    "engineSdk": ["C:/Users/gaian/.o3de/Engines/GS_Play_Engine"]
+  },
+
+  "excludeDirs": ["/build/", "/.cache/", "/Cache/", "/3rdParty/", "/External/"],
+
+  "variants": [
+    {
+      "name": "A-extension",
+      "db": "D:/OffLocalDev/gs_play/build/windows/clangd/compile_commands.json",
+      "extraArgs": []
+    }
+  ],
+
+  "sample": {
+    "perPart": 8,
+    "extraFiles": [
+      "D:/OffLocalDev/gs_play/Gem/Source/SandboxHeal_ItemComponent.h",
+      "D:/OffLocalDev/gs_play/Gem/Source/SandboxLogNotify.h",
+      "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h",
+      "D:/OffLocalDev/gs_play_gems/gs_item/Code/Include/GS_Item/Items/ItemComponents/GivesStock_ItemComponent.h",
+      "D:/OffLocalDev/gs_play_gems/gs_unit/Code/Include/GS_Unit/ActionGraph/UnitActionNodes.h",
+      "d:/OffLocalDev/o3de_sourcedev/Code/Framework/AzCore/AzCore/Component/Entity.h",
+      "D:/OffLocalDev/gs_play_gems/gs_ai/Code/Source/Clients/GS_AISystemComponent.cpp"
+    ]
+  },
+
+  // The nav stage indexes a REDUCED copy of the DB (the probe files, the .cpp files they should land in,
+  // and 2 neighbours per folder), so the background index FINISHES in minutes and the probe and symbol
+  // numbers are real. Indexing the full DB (2366 files) takes about an hour and a half even at 4 jobs;
+  // measure that index time on its own by deleting this "nav" block (the report then says "Compile DB: full").
+  // The check stage always uses the full DB. Do not compare nav numbers across runs that differ in this block.
+  "nav": {
+    "dbSubset": { "neighbours": 2 }
+  },
+
+  // indexWaitMin is the cap for the wait; with the full DB it needs 150 or more. jobs: this machine has 16 cores.
+  "limits": {
+    "checkTimeoutSec": 180,
+    "checkConcurrency": 3,
+    "indexWaitMin": 150,
+    "jobs": 12,
+    "diagnosticsWaitSec": 60
+  },
+
+  "probes": [
+    // ---- project gem -> project gem ---------------------------------------
+    {
+      "id": "proj-system-to-bus-alias", "part": "projectGem", "category": "project->project",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/GS_PlaySystemComponent.cpp",
+      "anchor": "GS_PlayInterface::Register(this);", "token": "GS_PlayInterface",
+      "expect": { "fileSuffix": "Gem/Include/GS_Play/GS_PlayBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-heal-to-health-find", "part": "projectGem", "category": "project->project",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxHeal_ItemComponent.cpp",
+      "anchor": "const SandboxHealthComponent* health = SandboxHealthComponent::Find(context.m_holder);", "token": "Find",
+      "expect": { "fileSuffix": "Gem/Source/SandboxHealthComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-heal-to-health-isfull-inline", "part": "projectGem", "category": "project->project",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxHeal_ItemComponent.cpp",
+      "anchor": "if (health && health->IsFull())", "token": "IsFull",
+      "expect": { "fileSuffix": "Gem/Source/SandboxHealthComponent.h", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-system-to-lognotify-reflect", "part": "projectGem", "category": "project->project",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/GS_PlaySystemComponent.cpp",
+      "anchor": "SandboxLogNotify::Reflect(context);", "token": "Reflect",
+      "expect": { "fileSuffix": "Gem/Source/SandboxLogNotify.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-module-to-system-class", "part": "projectGem", "category": "project->project",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/GS_PlayModule.cpp",
+      "anchor": "azrtti_typeid<GS_PlaySystemComponent>(),", "token": "GS_PlaySystemComponent",
+      "expect": { "fileSuffix": "Gem/Source/GS_PlaySystemComponent.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- project gem headers -> same gem / other gem -----------------------
+    {
+      "id": "proj-health-h-find-decl-to-cpp", "part": "projectGem", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxHealthComponent.h",
+      "anchor": "static SandboxHealthComponent* Find(AZ::EntityId entity);", "token": "Find",
+      "expect": { "fileSuffix": "Gem/Source/SandboxHealthComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-firearm-h-onaction-decl-to-cpp", "part": "projectGem", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxFirearm_ItemComponent.h",
+      "anchor": "bool OnAction(const GS_Core::ItemContext& context, const AZStd::string& action) override;", "token": "OnAction",
+      "expect": { "fileSuffix": "Gem/Source/SandboxFirearm_ItemComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-lognotify-h-onbegin-decl-to-cpp", "part": "projectGem", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxLogNotify.h",
+      "anchor": "void OnBegin(const GS_GraphCanvas::StateNotifyContext& context) const override;", "token": "OnBegin",
+      "expect": { "fileSuffix": "Gem/Source/SandboxLogNotify.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-heal-h-to-core-itemcomponenttype", "part": "projectGem", "category": "header->other gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxHeal_ItemComponent.h",
+      "anchor": "class SandboxHeal_ItemComponent : public GS_Core::ItemComponentType", "token": "ItemComponentType",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-lognotify-h-to-graphcanvas-statenotify", "part": "projectGem", "category": "header->other gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxLogNotify.h",
+      "anchor": "class SandboxLogNotify : public GS_GraphCanvas::StateNotify", "token": "StateNotify",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Nodes/StateNotify.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- project gem -> workspace gems --------------------------------------
+    {
+      "id": "proj-heal-to-core-itemcontext", "part": "projectGem", "category": "project->workspace gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxHeal_ItemComponent.cpp",
+      "anchor": "bool SandboxHeal_ItemComponent::AllowsUse(const GS_Core::ItemContext& context) const", "token": "ItemContext",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/ItemTypes.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-firearm-to-core-getstock", "part": "projectGem", "category": "project->workspace gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxFirearm_ItemComponent.cpp",
+      "anchor": "GS_Core::InventoryExchangeBus::EventResult(held, context.m_holder, &GS_Core::InventoryExchange::GetStock, m_ammoStock);", "token": "GetStock",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/InventoryExchangeBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-firearm-to-core-itemvalues-has", "part": "projectGem", "category": "project->workspace gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxFirearm_ItemComponent.cpp",
+      "anchor": "if (context.m_values && !context.m_values->Has(RoundsValue))", "token": "Has",
+      "expect": { "fileSuffix": "gs_core/Code/Source/Interfaces/Item/ItemTypes.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-lognotify-to-graphcanvas-statenotify-reflect", "part": "projectGem", "category": "project->workspace gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxLogNotify.cpp",
+      "anchor": "GS_GraphCanvas::StateNotify::Reflect(context);", "token": "Reflect",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Source/Nodes/StateNotify.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-lognotify-to-graphcanvas-shouldreflect", "part": "projectGem", "category": "project->workspace gem",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxLogNotify.cpp",
+      "anchor": "if (serializeContext && GS_GraphCanvas::ShouldReflect<SandboxLogNotify>(*serializeContext))", "token": "ShouldReflect",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Definition/ReflectOnce.h", "kind": "definition" }, "expectedBuilt": true
+    },
+
+    // ---- project gem -> engine header-only ----------------------------------
+    {
+      "id": "proj-system-to-engine-interface-get", "part": "projectGem", "category": "gem->engine header-only",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/GS_PlaySystemComponent.cpp",
+      "anchor": "if (GS_PlayInterface::Get() == nullptr)", "token": "Get",
+      "expect": { "fileSuffix": "AzCore/Interface/Interface.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "proj-health-to-engine-findentity-bus", "part": "projectGem", "category": "gem->engine header-only",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxHealthComponent.cpp",
+      "anchor": "AZ::ComponentApplicationBus::BroadcastResult(found, &AZ::ComponentApplicationRequests::FindEntity, entity);", "token": "FindEntity",
+      "expect": { "fileSuffix": "AzCore/Component/ComponentApplicationBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems: header -> same gem ---------------------------------
+    {
+      "id": "core-itemcomponenttype-h-reflect-decl-to-cpp", "part": "workspaceGems", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h",
+      "anchor": "static void Reflect(AZ::ReflectContext* context);", "token": "Reflect",
+      "expect": { "fileSuffix": "gs_core/Code/Source/Interfaces/Item/ItemComponentType.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-dialogueeffect-h-doeffect-decl-to-cpp", "part": "workspaceGems", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Dialogue/DialogueEffect.h",
+      "anchor": "virtual bool DoEffect();", "token": "DoEffect",
+      "expect": { "fileSuffix": "gs_core/Code/Source/Interfaces/Dialogue/DialogueEffect.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-managersys-h-reportready-decl-to-cpp", "part": "workspaceGems", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "void ReportReady();", "token": "ReportReady",
+      "expect": { "fileSuffix": "gs_core/Code/Source/GS_Manager/GS_ManagerSystemComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "unit-actionnodes-h-register-decl-to-cpp", "part": "workspaceGems", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_unit/Code/Include/GS_Unit/ActionGraph/UnitActionNodes.h",
+      "anchor": "bool RegisterUnitActionNodes(GS_GraphCanvas::INodeTypeRegistry& registry, AZStd::vector<AZ::TypeId>* added = nullptr);", "token": "RegisterUnitActionNodes",
+      "expect": { "fileSuffix": "gs_unit/Code/Source/ActionGraph/UnitActionNodes.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "complete-setcam-h-doeffect-decl-to-cpp", "part": "workspaceGems", "category": "header->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_complete/Code/Include/GS_Complete/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.h",
+      "anchor": "bool DoEffect() override;", "token": "DoEffect",
+      "expect": { "fileSuffix": "gs_complete/Code/Source/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems: gem -> same gem ------------------------------------
+    {
+      "id": "core-managersys-touchessettings-call-to-def", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_ManagerSystemComponent.cpp",
+      "anchor": "if (TouchesSettings(args.m_jsonKeyPath))", "token": "TouchesSettings",
+      "expect": { "fileSuffix": "gs_core/Code/Source/GS_Manager/GS_ManagerSystemComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-managersys-to-settings-path-cpp", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_ManagerSystemComponent.cpp",
+      "anchor": "const AZStd::string managerPath = GetManagerSettingsPath(scope, GetManagerName(), levelName);", "token": "GetManagerSettingsPath",
+      "expect": { "fileSuffix": "gs_core/Code/Source/GS_Manager/GS_ManagerSettings.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-managersys-to-inline-session-hook", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_ManagerSystemComponent.cpp",
+      "anchor": "OnSessionEngage();", "token": "OnSessionEngage",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "item-stockwallet-to-stocktype-shape", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_item/Code/Source/Stock/StockWallet.cpp",
+      "anchor": "const float added = AZStd::min(type.Shape(amount), GetRoom(type));", "token": "Shape",
+      "expect": { "fileSuffix": "gs_item/Code/Source/Stock/StockType.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "item-stockwallet-to-itemnames-inline", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_item/Code/Source/Stock/StockWallet.cpp",
+      "anchor": "if (NamesMatch(held.m_stock, stock))", "token": "NamesMatch",
+      "expect": { "fileSuffix": "gs_item/Code/Include/GS_Item/Items/ItemNames.h", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "unit-system-to-actionnodes-register", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_unit/Code/Source/Clients/GS_UnitSystemComponent.cpp",
+      "anchor": "const bool registered = RegisterUnitActionNodes(*nodeTypes, &m_unitActionNodes);", "token": "RegisterUnitActionNodes",
+      "expect": { "fileSuffix": "gs_unit/Code/Source/ActionGraph/UnitActionNodes.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "graphcanvas-statenotify-to-reflectonce-template", "part": "workspaceGems", "category": "gem->same gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Nodes/StateNotify.cpp",
+      "anchor": "if (ShouldReflect<NotifyWhen>(*serializeContext))", "token": "ShouldReflect",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Definition/ReflectOnce.h", "kind": "definition" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems: gem -> other gem -----------------------------------
+    {
+      "id": "complete-setcam-to-core-doeffect-cpp", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_complete/Code/Source/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.cpp",
+      "anchor": "return GS_Core::DialogueEffect::DoEffect();", "token": "DoEffect",
+      "expect": { "fileSuffix": "gs_core/Code/Source/Interfaces/Dialogue/DialogueEffect.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "complete-setcam-to-phantomcam-setpriority", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_complete/Code/Source/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.cpp",
+      "anchor": "GS_PhantomCam::PhantomCameraRequestBus::Event(targetCam, &GS_PhantomCam::PhantomCameraRequests::SetCameraPriority, priorityValue);", "token": "SetCameraPriority",
+      "expect": { "fileSuffix": "gs_phantomcam/Code/Include/GS_PhantomCam/Cameras/GS_PhantomCameraBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "complete-uibutton-to-cinematics-activate-cpp", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_complete/Code/Source/GS_Cinematics/Dialogue/GS_UIDialogueSelectButtonComponent.cpp",
+      "anchor": "DialogueSelectButtonComponent::Activate();", "token": "Activate",
+      "expect": { "fileSuffix": "gs_cinematics/Code/Source/Dialogue/DialogueSelectButtonComponent.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "complete-uibutton-to-cinematics-getinteractable-inline", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_complete/Code/Source/GS_Cinematics/Dialogue/GS_UIDialogueSelectButtonComponent.cpp",
+      "anchor": "GS_Core::UIInteractableEmissionBus::Handler::BusConnect(GetInteractableEntity());", "token": "GetInteractableEntity",
+      "expect": { "fileSuffix": "gs_cinematics/Code/Include/GS_Cinematics/Dialogue/DialogueSelectButtonComponent.h", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "item-givesstock-to-core-addstock", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_item/Code/Source/Items/ItemComponents/GivesStock_ItemComponent.cpp",
+      "anchor": "&GS_Core::InventoryExchange::AddStock, m_stockType, GetStockFor(1));", "token": "AddStock",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/InventoryExchangeBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "ui-manager-to-core-manager-base", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Source/GS_UIManagerComponent.cpp",
+      "anchor": "sc->Class<GS_UIManagerComponent, GS_ManagerComponent>()", "token": "GS_ManagerComponent",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerComponent.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-to-graphcanvas-definition-asset", "part": "workspaceGems", "category": "gem->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/Animator/PerformerAnimatorComponent.cpp",
+      "anchor": "const AZ::Data::Asset<GS_GraphCanvas::GraphDefinitionAsset> graph = m_graph;", "token": "GraphDefinitionAsset",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Definition/GraphDefinitionAsset.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems: header -> other gem --------------------------------
+    {
+      "id": "complete-uibutton-h-to-cinematics-base", "part": "workspaceGems", "category": "header->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_complete/Code/Include/GS_Complete/GS_Cinematics/Dialogue/GS_UIDialogueSelectButtonComponent.h",
+      "anchor": ": public DialogueSelectButtonComponent", "token": "DialogueSelectButtonComponent",
+      "expect": { "fileSuffix": "gs_cinematics/Code/Include/GS_Cinematics/Dialogue/DialogueSelectButtonComponent.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "item-givesstock-h-to-core-base", "part": "workspaceGems", "category": "header->other gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_item/Code/Include/GS_Item/Items/ItemComponents/GivesStock_ItemComponent.h",
+      "anchor": ": public GS_Core::ItemComponentType", "token": "ItemComponentType",
+      "expect": { "fileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems -> engine .cpp --------------------------------------
+    {
+      "id": "core-gamemgr-to-engine-assetmanager-instance", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_GameManagerComponent.cpp",
+      "anchor": "AZ::Data::AssetManager& assetManager = AZ::Data::AssetManager::Instance();", "token": "Instance",
+      "expect": { "fileSuffix": "AzCore/Asset/AssetManager.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-options-to-engine-stringfunc-equal", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/GS_OptionsManagerComponent.cpp",
+      "anchor": "if (schemeName.empty() || AZ::StringFunc::Equal(schemeName, DefaultInputSchemeName))", "token": "Equal",
+      "expect": { "fileSuffix": "AzCore/StringFunc/StringFunc.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-settingsstore-to-engine-writefile", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_ManagerSettingsStore.cpp",
+      "anchor": "const auto outcome = AZ::Utils::WriteFile(text, filePath);", "token": "WriteFile",
+      "expect": { "fileSuffix": "AzCore/Utils/Utils.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "interaction-toggle-to-engine-entity-activate", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_interaction/Code/Source/WorldTriggers/TriggerTypes/ToggleEntities_TriggerType.cpp",
+      "anchor": "entity->Activate();", "token": "Activate",
+      "expect": { "fileSuffix": "AzCore/Component/Entity.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "unit-manager-to-engine-entity-findcomponent", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_unit/Code/Source/Unit/GS_UnitManagerSystemComponent.cpp",
+      "anchor": "return entity && entity->FindComponent(azrtti_typeid<GS_UnitComponent>()) != nullptr;", "token": "FindComponent",
+      "expect": { "fileSuffix": "AzCore/Component/Entity.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-bootsplash-to-engine-projectdisplayname", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/BootSplash.cpp",
+      "anchor": "AZStd::to_wstring(title, AZ::Utils::GetProjectDisplayName().c_str());", "token": "GetProjectDisplayName",
+      "expect": { "fileSuffix": "AzCore/Utils/Utils.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-bodies-to-engine-geteditcontext", "part": "workspaceGems", "category": "gem->engine .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_ManagerBodies.cpp",
+      "anchor": "if (AZ::EditContext* editContext = serializeContext->GetEditContext())", "token": "GetEditContext",
+      "expect": { "fileSuffix": "AzCore/Serialization/SerializeContext.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems -> engine header-only -------------------------------
+    {
+      "id": "core-gamemgr-to-engine-tickbus", "part": "workspaceGems", "category": "gem->engine header-only",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_GameManagerComponent.cpp",
+      "anchor": "AZ::TickBus::Handler::BusConnect();", "token": "TickBus",
+      "expect": { "fileSuffix": "AzCore/Component/TickBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-options-to-engine-iconsole-interface", "part": "workspaceGems", "category": "gem->engine header-only",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/Options/CoreApplyTargets.cpp",
+      "anchor": "auto* console = AZ::Interface<AZ::IConsole>::Get();", "token": "IConsole",
+      "expect": { "fileSuffix": "AzCore/Console/IConsole.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gem headers -> engine ------------------------------------
+    {
+      "id": "graphcanvas-variable-h-to-engine-uuid-createrandom", "part": "workspaceGems", "category": "header->engine",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Include/GS_GraphCanvas/Variables/GraphVariable.h",
+      "anchor": "static VariableId Create() { return { AZ::Uuid::CreateRandom() }; }", "token": "CreateRandom",
+      "expect": { "fileSuffix": "AzCore/Math/Uuid.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-inventory-h-to-engine-ebus-template", "part": "workspaceGems", "category": "header->engine",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/InventoryExchangeBus.h",
+      "anchor": "using InventoryExchangeBus = AZ::EBus<InventoryExchange>;", "token": "EBus",
+      "expect": { "fileSuffix": "AzCore/EBus/EBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-inventory-h-to-engine-ebustraits", "part": "workspaceGems", "category": "header->engine",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/InventoryExchangeBus.h",
+      "anchor": ": public AZ::EBusTraits", "token": "EBusTraits",
+      "expect": { "fileSuffix": "AzCore/EBus/EBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gems -> engine gems (header-only targets) ----------------
+    {
+      "id": "cinematics-button-to-lyshine-uitext", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_cinematics/Code/Source/Dialogue/DialogueSelectButtonComponent.cpp",
+      "anchor": "UiTextBus::Event(buttonTextEntity, &UiTextInterface::SetText, text);", "token": "SetText",
+      "expect": { "fileSuffix": "LyShine/Code/Include/LyShine/Bus/UiTextBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "ui-manager-to-lyshine-loadcanvas", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Source/GS_UIManagerComponent.cpp",
+      "anchor": "UiCanvasManagerBus::BroadcastResult(canvasId, &UiCanvasManagerInterface::LoadCanvas, uiPath);", "token": "LoadCanvas",
+      "expect": { "fileSuffix": "LyShine/Code/Include/LyShine/Bus/UiCanvasManagerBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-biome-to-lmbrcentral-dependencybus", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Vegetation/VegBiomeAreaComponent.cpp",
+      "anchor": "LmbrCentral::DependencyNotificationBus::Handler::BusConnect(m_monitorOwnerId);", "token": "DependencyNotificationBus",
+      "expect": { "fileSuffix": "LmbrCentral/Code/include/LmbrCentral/Dependency/DependencyNotificationBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-postfx-to-atom-rpi-scene-lookup", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/Options/PostFxOverride.cpp",
+      "anchor": "AZ::RPI::Scene* scene = rpiSystem ? rpiSystem->GetSceneByName(AZ::Name(\"Main\")) : nullptr;", "token": "GetSceneByName",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Include/Atom/RPI.Public/RPISystemInterface.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-postfx-to-atom-feature-interface", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/Options/PostFxOverride.cpp",
+      "anchor": "return scene ? scene->GetFeatureProcessor<AZ::Render::PostProcessFeatureProcessorInterface>() : nullptr;", "token": "PostProcessFeatureProcessorInterface",
+      "expect": { "fileSuffix": "Atom/Feature/Common/Code/Include/Atom/Feature/PostProcess/PostProcessFeatureProcessorInterface.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-to-emotionfx-actor-notification-bus", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/Animator/PerformerAnimatorComponent.cpp",
+      "anchor": "EMotionFX::Integration::ActorComponentNotificationBus::Handler::BusConnect(GetEntityId());", "token": "ActorComponentNotificationBus",
+      "expect": { "fileSuffix": "EMotionFX/Code/Include/Integration/ActorComponentBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-to-emotionfx-actorinstance-getactor", "part": "workspaceGems", "category": "gem->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/Animator/PerformerAnimatorComponent.cpp",
+      "anchor": "const EMotionFX::Actor& actor = m_actorInstance ? *m_actorInstance->GetActor() : *m_characterActor;", "token": "GetActor",
+      "expect": { "fileSuffix": "EMotionFX/Code/EMotionFX/Source/ActorInstance.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- workspace gem headers -> engine gems -------------------------------
+    {
+      "id": "cinematics-button-h-to-lyshine-uibutton", "part": "workspaceGems", "category": "header->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_cinematics/Code/Include/GS_Cinematics/Dialogue/DialogueSelectButtonComponent.h",
+      "anchor": ", public UiButtonNotificationBus::Handler", "token": "UiButtonNotificationBus",
+      "expect": { "fileSuffix": "LyShine/Code/Include/LyShine/Bus/UiButtonBus.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-biome-h-to-lmbrcentral-monitor", "part": "workspaceGems", "category": "header->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Include/GS_Environment/Vegetation/VegBiomeAreaComponent.h",
+      "anchor": "LmbrCentral::DependencyMonitor m_dependencyMonitor;", "token": "DependencyMonitor",
+      "expect": { "fileSuffix": "LmbrCentral/Code/include/LmbrCentral/Dependency/DependencyMonitor.h", "kind": "any" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-postfx-h-to-atom-motionblur", "part": "workspaceGems", "category": "header->engine gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/Options/PostFxOverride.h",
+      "anchor": "AZ::Render::MotionBlurSettingsInterface*          MotionBlur();", "token": "MotionBlurSettingsInterface",
+      "expect": { "fileSuffix": "Atom/Feature/Common/Code/Include/Atom/Feature/PostProcess/MotionBlur/MotionBlurSettingsInterface.h", "kind": "any" }, "expectedBuilt": true
+    },
+
+    // ---- unbuilt gems (not in this project's build; reported separately) ----
+    {
+      "id": "ai-unbuilt-system-to-bus-alias", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ai/Code/Source/Clients/GS_AISystemComponent.cpp",
+      "anchor": "GS_AIRequestBus::Handler::BusConnect();", "token": "GS_AIRequestBus",
+      "expect": { "fileSuffix": "gs_ai/Code/Include/GS_AI/GS_AIBus.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "ai-unbuilt-system-to-engine-tickbus", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ai/Code/Source/Clients/GS_AISystemComponent.cpp",
+      "anchor": "AZ::TickBus::Handler::BusConnect();", "token": "TickBus",
+      "expect": { "fileSuffix": "AzCore/Component/TickBus.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "world-unbuilt-system-to-bus-alias", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_world/Code/Source/Clients/GS_WorldSystemComponent.cpp",
+      "anchor": "GS_WorldRequestBus::Handler::BusConnect();", "token": "GS_WorldRequestBus",
+      "expect": { "fileSuffix": "gs_world/Code/Include/GS_World/GS_WorldBus.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "world-unbuilt-system-to-engine-interface", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_world/Code/Source/Clients/GS_WorldSystemComponent.cpp",
+      "anchor": "if (GS_WorldInterface::Get() == nullptr)", "token": "Get",
+      "expect": { "fileSuffix": "AzCore/Interface/Interface.h", "kind": "any" }, "expectedBuilt": false
+    },
+
+    // ---- fix-proving: workspace gem -> engine GEM .cpp -----------------------------
+    // The expected .cpp files belong to engine gems that have no compile-DB entry today, so F12 lands on the header
+    // declaration and these probes FAIL on today's database. They pass once engine-gem sources are covered.
+    {
+      "id": "performer-posesink-to-emotionfx-setmotionsystem", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/EMotionFX/EMotionFXPoseSink.cpp",
+      "anchor": "actorInstance->SetMotionSystem(m_motionSystem);", "token": "SetMotionSystem",
+      "expect": { "fileSuffix": "EMotionFX/Code/EMotionFX/Source/ActorInstance.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-posesink-to-emotionfx-calcstaticbasedaabb", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/EMotionFX/EMotionFXPoseSink.cpp",
+      "anchor": "m_actorInstance->CalcStaticBasedAabb(&bounds);", "token": "CalcStaticBasedAabb",
+      "expect": { "fileSuffix": "EMotionFX/Code/EMotionFX/Source/ActorInstance.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-posesink-to-emotionfx-motionlayersystem-create", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/EMotionFX/EMotionFXPoseSink.cpp",
+      "anchor": "EMotionFX::MotionLayerSystem::Create(m_actorInstance)", "token": "Create",
+      "expect": { "fileSuffix": "EMotionFX/Code/EMotionFX/Source/MotionLayerSystem.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-animsource-to-emotionfx-motionset-loadmotion", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/EMotionFX/EMotionFXAnimSource.cpp",
+      "anchor": "motionSet->LoadMotion(entry.second)", "token": "LoadMotion",
+      "expect": { "fileSuffix": "EMotionFX/Code/EMotionFX/Source/MotionSet.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-animsource-to-emotionfx-pose-localtransform", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Animation/EMotionFX/EMotionFXAnimSource.cpp",
+      "anchor": "bindPose->GetLocalSpaceTransform(index)", "token": "GetLocalSpaceTransform",
+      "expect": { "fileSuffix": "EMotionFX/Code/EMotionFX/Source/Pose.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "juice-pixelate-to-atom-renderpipeline-findfirstpass", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_juice/Code/Source/PostProcessing/PixelateFeatureProcessor.cpp",
+      "anchor": "pipeline->FindFirstPass(m_debugPassName);", "token": "FindFirstPass",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/RenderPipeline.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "juice-pixelate-to-atom-parentpass-findchildpass", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_juice/Code/Source/PostProcessing/PixelateFeatureProcessor.cpp",
+      "anchor": "parent->FindChildPass(m_compositePassName)", "token": "FindChildPass",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Pass/ParentPass.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "juice-pixelate-to-atom-srg-findshaderinputconstantindex", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_juice/Code/Source/PostProcessing/PixelateFeatureProcessor.cpp",
+      "anchor": "srg->FindShaderInputConstantIndex(m_pixelSizeConstantName)", "token": "FindShaderInputConstantIndex",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Shader/ShaderResourceGroup.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "juice-pixelate-to-atom-assetutils-productpath", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_juice/Code/Source/PostProcessing/PixelateFeatureProcessor.cpp",
+      "anchor": "AZ::RPI::AssetUtils::GetAssetIdForProductPath(product", "token": "GetAssetIdForProductPath",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Reflect/Asset/AssetUtils.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "ui-textures-to-atom-streamingimage-createfromcpudata", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Source/UICanvas/Render/UICanvasTextures.cpp",
+      "anchor": "const AZ::Data::Instance<AZ::RPI::StreamingImage> image = AZ::RPI::StreamingImage::CreateFromCpuData(", "token": "CreateFromCpuData",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Image/StreamingImage.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "ui-textures-to-atom-attachmentimage-findorcreate", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Source/UICanvas/Render/UICanvasTextures.cpp",
+      "anchor": "AZ::RPI::AttachmentImage::FindOrCreate(paintedAsset)", "token": "FindOrCreate",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Image/AttachmentImage.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "performer-skininput-to-atom-buffer-findorcreate", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_performer/Code/Source/Character/CharacterSkinInput.cpp",
+      "anchor": "AZ::RPI::Buffer::FindOrCreate(jointIdAsset)", "token": "FindOrCreate",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Buffer/Buffer.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-vegfp-to-atom-model-findorcreate", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Render/VegetationInstanceFeatureProcessor.cpp",
+      "anchor": "level.m_model = AZ::RPI::Model::FindOrCreate(modelAsset);", "token": "FindOrCreate",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Model/Model.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-vegfp-to-atom-shader-findorcreate", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Render/VegetationInstanceFeatureProcessor.cpp",
+      "anchor": "AZ::RPI::Shader::FindOrCreate(shaderAsset)", "token": "FindOrCreate",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Shader/Shader.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-vegfp-to-atom-srg-create", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Render/VegetationInstanceFeatureProcessor.cpp",
+      "anchor": "m_vegetationSrg = AZ::RPI::ShaderResourceGroup::Create(", "token": "Create",
+      "expect": { "fileSuffix": "Atom/RPI/Code/Source/RPI.Public/Shader/ShaderResourceGroup.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-vegfp-to-atom-rhi-getformatsize", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Render/VegetationInstanceFeatureProcessor.cpp",
+      "anchor": "AZ::RHI::GetFormatSize(AZ::RHI::Format::R32G32B32A32_FLOAT)", "token": "GetFormatSize",
+      "expect": { "fileSuffix": "Atom/RHI/Code/Source/RHI.Reflect/Format.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-biomedef-to-surfacedata-enumeratepoints", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Vegetation/VegBiomeDefinition.cpp",
+      "anchor": "surfacePoints.EnumeratePoints(", "token": "EnumeratePoints",
+      "expect": { "fileSuffix": "SurfaceData/Code/Source/SurfacePointList.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "environment-biomedef-to-surfacedata-hasanymatchingtags", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_environment/Code/Source/Vegetation/VegBiomeDefinition.cpp",
+      "anchor": "tagFound = surfaceWeights.HasAnyMatchingTags(m_tags, m_minWeight, 1.0f);", "token": "HasAnyMatchingTags",
+      "expect": { "fileSuffix": "SurfaceData/Code/Source/SurfaceDataTypes.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+    {
+      "id": "core-imguimenu-to-imgui-beginmenu", "part": "workspaceGems", "category": "gem->engine gem .cpp",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/Systems/GS_ImGuiMenu/GS_ImGuiMenuComponent.cpp",
+      "anchor": "if (ImGui::BeginMenu(\"GS_Play\"))", "token": "BeginMenu",
+      "expect": { "fileSuffix": "ImGui/External/ImGui/v1.82/imgui/imgui_widgets.cpp", "kind": "definition" }, "expectedBuilt": true
+    },
+
+    // ---- entry-less files: no compile-DB entry of their own ------------------------
+    // Legacy gs_graphcanvas / gs_ui / gs_cinematics files and unbuilt gems (gs_ai, gs_world) have no entry, so clangd infers
+    // their flags. The ones that include their own headers through <Gem/...> paths need the owning gem's include dirs and
+    // FAIL today; those that reach a same-folder header through a quoted include can pass on inferred flags.
+    {
+      "id": "legacy-mainwindow-to-noderegistry-populate", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Editor/MainWindow.cpp",
+      "anchor": "NodeRegistry::Get().PopulateNodePalette(rootItem, m_editorId, m_systemId, excludeCategories);", "token": "PopulateNodePalette",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/NodeRegistry.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-mainwindow-to-graphcontext-class", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Editor/MainWindow.cpp",
+      "anchor": ", m_graphContext(AZStd::make_shared<GraphContext>())", "token": "GraphContext",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Core/GraphContext.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-mainwindow-to-engine-getprojectpath", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Editor/MainWindow.cpp",
+      "anchor": "AZ::IO::FixedMaxPath projectPath = AZ::Utils::GetProjectPath();", "token": "GetProjectPath",
+      "expect": { "fileSuffix": "AzCore/Utils/Utils.cpp", "kind": "definition" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-mainwindow-to-graphmodel-graph", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Editor/MainWindow.cpp",
+      "anchor": "AZStd::make_shared<GraphModel::Graph>(GetGraphContext());", "token": "Graph",
+      "expect": { "fileSuffix": "GraphModel/Code/Include/GraphModel/Model/Graph.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-graphcontroller-to-graphmodel-addnode", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Core/GS_GraphController.cpp",
+      "anchor": "GraphModelIntegration::GraphController::AddNode(node, sceneDropPosition)", "token": "AddNode",
+      "expect": { "fileSuffix": "GraphModel/Code/Include/GraphModel/Integration/GraphController.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-graphcontroller-ctor-to-own-header", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Core/GS_GraphController.cpp",
+      "anchor": "GS_GraphController::GS_GraphController(", "token": "GS_GraphController",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Source/Core/GS_GraphController.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-variabletablemodel-to-graphvariable", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Editor/VariableTableModel.cpp",
+      "anchor": "void VariableTableModel::SetVariables(AZStd::vector<GraphVariable>* variables)", "token": "GraphVariable",
+      "expect": { "fileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Variables/GraphVariable.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-basenode-to-graphmodel-node", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_graphcanvas/Code/Source/Nodes/BaseNode.cpp",
+      "anchor": "serializeContext->Class<BaseNode, GraphModel::Node>()", "token": "Node",
+      "expect": { "fileSuffix": "GraphModel/Code/Include/GraphModel/Model/Node.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-uihub-to-own-hubbus", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Source/UINavigation/GS_UIHubComponent.cpp",
+      "anchor": "UIHubNotificationBus::Event(m_entityId, &UIHubNotifications::HubInitialized);", "token": "HubInitialized",
+      "expect": { "fileSuffix": "gs_ui/Code/Include/GS_UI/UINavigation/GS_UIHubBus.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-uihub-to-lyshine-interactivity-state", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Source/UINavigation/GS_UIHubComponent.cpp",
+      "anchor": "UiHierarchyInteractivityToggleBus::EventResult(isPageInteractable, m_entityId, &UiHierarchyInteractivityToggleInterface::GetInteractiveState);", "token": "GetInteractiveState",
+      "expect": { "fileSuffix": "LyShine/Code/Include/LyShine/Bus/UiHierarchyInteractivityToggleBus.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "legacy-cinematics-sequenceasset-to-own-header", "part": "workspaceGems", "category": "legacy file",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_cinematics/Code/Source/Dialogue/DialogueSequenceAsset.cpp",
+      "anchor": "void DialogueSequenceAsset::ExtractData(", "token": "ExtractData",
+      "expect": { "fileSuffix": "gs_cinematics/Code/Include/GS_Cinematics/Dialogue/DialogueSequenceAsset.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "ai-unbuilt-moduleinterface-to-own-header", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ai/Code/Source/GS_AIModuleInterface.cpp",
+      "anchor": "GS_AIModuleInterface::GS_AIModuleInterface()", "token": "GS_AIModuleInterface",
+      "expect": { "fileSuffix": "gs_ai/Code/Source/GS_AIModuleInterface.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "ai-unbuilt-editor-component-to-base-component", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ai/Code/Source/Tools/GS_AIEditorSystemComponent.cpp",
+      "anchor": "serializeContext->Class<GS_AIEditorSystemComponent, GS_AISystemComponent>()", "token": "GS_AISystemComponent",
+      "expect": { "fileSuffix": "gs_ai/Code/Source/Clients/GS_AISystemComponent.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "world-unbuilt-editor-component-to-base-component", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_world/Code/Source/Tools/GS_WorldEditorSystemComponent.cpp",
+      "anchor": "serializeContext->Class<GS_WorldEditorSystemComponent, GS_WorldSystemComponent>()", "token": "GS_WorldSystemComponent",
+      "expect": { "fileSuffix": "gs_world/Code/Source/Clients/GS_WorldSystemComponent.h", "kind": "any" }, "expectedBuilt": false
+    },
+    {
+      "id": "world-unbuilt-editor-component-to-engine-editorevents", "part": "workspaceGems", "category": "unbuilt gem",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_world/Code/Source/Tools/GS_WorldEditorSystemComponent.cpp",
+      "anchor": "AzToolsFramework::EditorEvents::Bus::Handler::BusConnect();", "token": "EditorEvents",
+      "expect": { "fileSuffix": "AzToolsFramework/API/ToolsApplicationAPI.h", "kind": "any" }, "expectedBuilt": false
+    },
+
+    // ---- relationships: find references (index needed) -----------------------------
+    {
+      "id": "refs-reportready-across-brains", "type": "references", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "void ReportReady();", "token": "ReportReady",
+      // minFiles can only count files the nav.dbSubset indexed, so the .cpp files listed here are what lets 10 be reached
+      // (the same files also let rename-reportready reach its 10). Every one of them calls ReportReady().
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/GS_ItemManagerSystemComponent.cpp",
+          "gs_ui/Code/Source/GS_UIManagerSystemComponent.cpp",
+          "gs_unit/Code/Source/Unit/GS_UnitManagerSystemComponent.cpp",
+          "gs_phantomcam/Code/Source/GS_CamManagerSystemComponent.cpp",
+          "gs_audio/Code/Source/GS_AudioManagerSystemComponent.cpp",
+          "gs_juice/Code/Source/GS_JuiceManagerSystemComponent.cpp",
+          "gs_performer/Code/Source/GS_PerformerManagerSystemComponent.cpp",
+          "gs_cinematics/Code/Source/GS_CinematicsManagerSystemComponent.cpp"
+        ],
+        "minFiles": 10
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "refs-evaluatecurve-across-gems", "type": "references", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Utility/Math/CurvesUtility.h",
+      "anchor": "float EvaluateCurve(CurveType curve, float t);", "token": "EvaluateCurve",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_audiopro/Code/Source/Score/ScoreLayerRule.cpp",
+          "gs_phantomcam/Code/Source/Core/GS_CamCoreComponent.cpp",
+          "gs_core/Code/Source/Systems/GS_Motion/GS_Motion.cpp"
+        ],
+        "minFiles": 6
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "refs-booleanconditions-across-gems", "type": "references", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Utility/CommonEnums.h",
+      "anchor": "enum BooleanConditions", "token": "BooleanConditions",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_audiopro/Code/Source/Score/ScoreLayerRule.cpp",
+          "gs_cinematics/Code/Source/Dialogue/Conditions/Boolean_DialogueCondition.cpp",
+          "gs_interaction/Code/Source/WorldTriggers/SensorTypes/Record_SensorType.cpp"
+        ],
+        "minFiles": 3
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "refs-dialogueeffect-class-across-gems", "type": "references", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Dialogue/DialogueEffect.h",
+      "anchor": "class DialogueEffect", "token": "DialogueEffect",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_cinematics/Code/Source/Dialogue/Effects/SetRecords_DialogueEffect.cpp",
+          "gs_cinematics/Code/Source/Dialogue/Effects/ToggleEntitiesActive_DialogueEffect.cpp",
+          "gs_complete/Code/Source/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.cpp"
+        ],
+        "minFiles": 4
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "refs-imguimenu-bus-across-gems", "type": "references", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Systems/GS_ImGuiMenu/GS_ImGuiMenuBus.h",
+      "anchor": "using GS_ImGuiMenuNotificationBus = AZ::EBus<GS_ImGuiMenuNotifications>;", "token": "GS_ImGuiMenuNotificationBus",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_audio/Code/Source/Debug/GS_AudioImGuiDebugComponent.cpp",
+          "gs_environment/Code/Source/Debug/VegDiagnosticsComponent.cpp",
+          "gs_item/Code/Source/Debug/GS_ItemImGuiDebugComponent.cpp",
+          "gs_phantomcam/Code/Source/Debug/PhantomCamImGuiDebugComponent.cpp"
+        ],
+        "minFiles": 5
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "refs-inventoryexchange-bus-project-and-item", "type": "references", "part": "projectGem", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play/Gem/Source/SandboxFirearm_ItemComponent.cpp",
+      "anchor": "GS_Core::InventoryExchangeBus::EventResult(held, context.m_holder, &GS_Core::InventoryExchange::GetStock, m_ammoStock);", "token": "InventoryExchangeBus",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/Items/ItemComponents/GivesStock_ItemComponent.cpp",
+          "gs_item/Code/Source/Inventory/InventoryComponent.cpp",
+          "gs_item/Code/Source/Debug/GS_ItemImGuiDebugComponent.cpp"
+        ],
+        "minFiles": 3
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "refs-lmbrcentral-tagrequests-across-gems", "type": "references", "part": "workspaceGems", "category": "engine->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_interaction/Code/Source/Targeting/GS_TargetComponent.cpp",
+      "anchor": "LmbrCentral::TagComponentRequestBus::Event(GetEntityId(), &LmbrCentral::TagComponentRequests::AddTag, AZ::Crc32(\"Target\"));", "token": "TagComponentRequests",
+      // minFiles can only count files the nav.dbSubset indexed, so the .cpp files listed here are what lets 8 be reached.
+      // Every one of them uses LmbrCentral::TagComponentRequests (12 files do in the gem corpus).
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_interaction/Code/Source/Targeting/GS_TargetComponent.cpp",
+          "gs_unit/Code/Source/Unit/GS_UnitComponent.cpp",
+          "gs_phantomcam/Code/Source/Targeting/CameraInfluenceFieldComponent.cpp",
+          "gs_interaction/Code/Source/Targeting/GS_InteractTargetComponent.cpp",
+          "gs_interaction/Code/Source/Targeting/GS_TargetingInteractionFieldComponent.cpp",
+          "gs_interaction/Code/Source/WorldTriggers/SensorTypes/PlayerInteract_SensorType.cpp",
+          "gs_phantomcam/Code/Source/Cameras/GS_PhantomCameraComponent.cpp",
+          "gs_unit/Code/Source/Controller/GS_UnitControllerComponent.cpp",
+          "gs_unit/Code/Source/Unit/Mover/GS_MoverContextComponent.cpp"
+        ],
+        "minFiles": 8
+      },
+      "expectedBuilt": true
+    },
+
+    // ---- relationships: go to implementation (index needed) ------------------------
+    {
+      "id": "impl-onsessionengage-to-brains", "type": "implementation", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "virtual void OnSessionEngage() { ReportReady(); }", "token": "OnSessionEngage",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/GS_ItemManagerSystemComponent.cpp",
+          "gs_ui/Code/Source/GS_UIManagerSystemComponent.cpp",
+          "gs_unit/Code/Source/Unit/GS_UnitManagerSystemComponent.cpp",
+          "gs_phantomcam/Code/Source/GS_CamManagerSystemComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "impl-getmanagername-to-brains", "type": "implementation", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "virtual AZStd::string_view GetManagerName() const = 0;", "token": "GetManagerName",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Include/GS_Item/GS_ItemManagerSystemComponent.h",
+          "gs_ui/Code/Include/GS_UI/GS_UIManagerSystemComponent.h",
+          "gs_unit/Code/Include/GS_Unit/Unit/GS_UnitManagerSystemComponent.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "impl-doeffect-to-dialogue-effects", "type": "implementation", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Dialogue/DialogueEffect.h",
+      "anchor": "virtual bool DoEffect();", "token": "DoEffect",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_cinematics/Code/Source/Dialogue/Effects/SetRecords_DialogueEffect.cpp",
+          "gs_cinematics/Code/Source/Dialogue/Effects/ToggleEntitiesActive_DialogueEffect.cpp",
+          "gs_complete/Code/Source/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.cpp",
+          "gs_complete/Code/Source/GS_Cinematics/Dialogue/Effects/TogglePhantomCam_DialogueEffectComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "impl-onused-to-project-and-item-components", "type": "implementation", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h",
+      "anchor": "virtual void OnUsed(", "token": "OnUsed",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/Items/ItemComponents/GivesStock_ItemComponent.cpp",
+          "Gem/Source/SandboxHeal_ItemComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "impl-imguimenu-update-to-debug-components", "type": "implementation", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Systems/GS_ImGuiMenu/GS_ImGuiMenuBus.h",
+      "anchor": "virtual void OnGSImGuiMenuUpdate() {}", "token": "OnGSImGuiMenuUpdate",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_audio/Code/Source/Debug/GS_AudioImGuiDebugComponent.cpp",
+          "gs_environment/Code/Source/Debug/VegDiagnosticsComponent.cpp",
+          "gs_item/Code/Source/Debug/GS_ItemImGuiDebugComponent.cpp",
+          "gs_phantomcam/Code/Source/Debug/PhantomCamImGuiDebugComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "impl-engine-component-activate-to-gem-components", "type": "implementation", "part": "engineSource", "category": "engine->gems",
+      "file": "d:/OffLocalDev/o3de_sourcedev/Code/Framework/AzCore/AzCore/Component/Component.h",
+      "anchor": "virtual void Activate() = 0;", "token": "Activate",
+      // Not GS_ManagerSystemComponent.cpp / GS_UnitComponent.cpp: clangd's dynamic index keeps the declaration-only symbols of every
+      // file opened earlier in the session (a header an earlier probe file includes), and those shadow the .cpp definition in an
+      // implementation answer, so the result depended on probe order. These three come back as .cpp definitions in recipe order.
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_interaction/Code/Source/Targeting/GS_TargetComponent.cpp",
+          "gs_interaction/Code/Source/Pulsors/PulsorComponent.cpp",
+          "gs_unit/Code/Source/Unit/MovementInfluenceFieldComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+
+    // ---- relationships: type hierarchy, subtypes (index needed) --------------------
+    // The judge reads both levels together, so the second-level targets of the two-level probes sit in subtypeFileSuffixes.
+    {
+      "id": "hierarchy-managersystem-to-brains", "type": "typeHierarchy", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "class GS_ManagerSystemComponent", "token": "GS_ManagerSystemComponent",
+      "expect": {
+        "subtypeFileSuffixes": [
+          "gs_item/Code/Include/GS_Item/GS_ItemManagerSystemComponent.h",
+          "gs_ui/Code/Include/GS_UI/GS_UIManagerSystemComponent.h",
+          "gs_unit/Code/Include/GS_Unit/Unit/GS_UnitManagerSystemComponent.h",
+          "gs_phantomcam/Code/Include/GS_PhantomCam/GS_CamManagerSystemComponent.h",
+          "gs_core/Code/Include/GS_Core/GS_Save/GS_SaveManagerSystemComponent.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "hierarchy-itemcomponenttype-to-item-kinds", "type": "typeHierarchy", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h",
+      "anchor": "class ItemComponentType", "token": "ItemComponentType",
+      "expect": {
+        "subtypeFileSuffixes": [
+          "gs_item/Code/Include/GS_Item/Items/ItemComponents/GivesStock_ItemComponent.h",
+          "gs_item/Code/Include/GS_Item/Items/ItemComponents/Consumable_ItemComponent.h",
+          "Gem/Source/SandboxHeal_ItemComponent.h",
+          "Gem/Source/SandboxFirearm_ItemComponent.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "hierarchy-dialogueeffect-to-effects", "type": "typeHierarchy", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Dialogue/DialogueEffect.h",
+      "anchor": "class DialogueEffect", "token": "DialogueEffect",
+      "expect": {
+        "subtypeFileSuffixes": [
+          "gs_cinematics/Code/Include/GS_Cinematics/Dialogue/Effects/SetRecords_DialogueEffect.h",
+          "gs_cinematics/Code/Include/GS_Cinematics/Dialogue/Effects/ToggleEntitiesActive_DialogueEffect.h",
+          "gs_complete/Code/Include/GS_Complete/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.h",
+          "gs_complete/Code/Include/GS_Complete/GS_Cinematics/Dialogue/Effects/TogglePhantomCam_DialogueEffectComponent.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "hierarchy-physicstrigger-to-gem-fields", "type": "typeHierarchy", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Utility/Physics/PhysicsTriggerComponent.h",
+      "anchor": "class PhysicsTriggerComponent", "token": "PhysicsTriggerComponent",
+      "expect": {
+        "subtypeFileSuffixes": [
+          "gs_interaction/Code/Include/GS_Interaction/Pulsors/PulsorComponent.h",
+          "gs_phantomcam/Code/Include/GS_PhantomCam/Targeting/CameraTugVolumeComponent.h",
+          "gs_unit/Code/Include/GS_Unit/Unit/MovementInfluenceFieldComponent.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "hierarchy-motiontrack-two-levels", "type": "typeHierarchy", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Systems/GS_Motion/GS_MotionTrack.h",
+      "anchor": "class GS_MotionTrack", "token": "GS_MotionTrack",
+      "expect": {
+        "subtypeFileSuffixes": [
+          "gs_core/Code/Include/GS_Core/Interfaces/Motion/UiMotionTrack.h",
+          "gs_core/Code/Include/GS_Core/Interfaces/Motion/FeedbackMotionTrack.h",
+          "gs_ui/Code/Include/GS_UI/UIMotions/MotionTracks/UiPositionTrack.h",
+          "gs_juice/Code/Include/GS_Juice/GS_Feedback/MotionTracks/FeedbackTransformTrack.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "hierarchy-engine-component-to-core-bases", "type": "typeHierarchy", "part": "workspaceGems", "category": "engine->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": ": public AZ::Component", "token": "Component",
+      "expect": {
+        "subtypeFileSuffixes": [
+          "gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+          "gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerRegistrantComponent.h",
+          "gs_item/Code/Include/GS_Item/GS_ItemManagerSystemComponent.h"
+        ]
+      },
+      "expectedBuilt": true
+    },
+
+    // ---- relationships: call hierarchy, incoming calls (index needed) --------------
+    {
+      "id": "calls-reportready-callers", "type": "incomingCalls", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "void ReportReady();", "token": "ReportReady",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/GS_ItemManagerSystemComponent.cpp",
+          "gs_ui/Code/Source/GS_UIManagerSystemComponent.cpp",
+          "gs_unit/Code/Source/Unit/GS_UnitManagerSystemComponent.cpp",
+          "gs_phantomcam/Code/Source/GS_CamManagerSystemComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "calls-evaluatecurve-callers", "type": "incomingCalls", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Utility/Math/CurvesUtility.h",
+      "anchor": "float EvaluateCurve(CurveType curve, float t);", "token": "EvaluateCurve",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_audiopro/Code/Source/Score/ScoreLayerRule.cpp",
+          "gs_phantomcam/Code/Source/Core/GS_CamCoreComponent.cpp",
+          "gs_core/Code/Source/Systems/GS_Motion/GS_Motion.cpp",
+          "gs_phantomcam/Code/Source/Stages/TugListeners.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "calls-booleancomparison-callers", "type": "incomingCalls", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_cinematics/Code/Source/Dialogue/Conditions/Record_DialogueCondition.cpp",
+      "anchor": "return GS_Core::BooleanComparison(sysValue, RecordData.recordProgress, condition);", "token": "BooleanComparison",
+      "expect": {
+        "mustIncludeFileSuffixes": [
+          "gs_cinematics/Code/Source/Dialogue/Conditions/Record_DialogueCondition.cpp",
+          "gs_interaction/Code/Source/WorldTriggers/SensorTypes/Record_SensorType.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "calls-onused-hook-caller", "type": "incomingCalls", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h",
+      "anchor": "virtual void OnUsed(", "token": "OnUsed",
+      "expect": {
+        "mustIncludeFileSuffixes": ["gs_item/Code/Source/Items/ItemHooks.cpp"]
+      },
+      "expectedBuilt": true
+    },
+
+    // ---- relationships: rename, dry run (index needed) -----------------------------
+    // The WorkspaceEdit is only counted, never applied: nothing in the gems is written.
+    {
+      "id": "rename-reportready", "type": "rename", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "void ReportReady();", "token": "ReportReady",
+      "expect": {
+        "minFiles": 10,
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/GS_ItemManagerSystemComponent.cpp",
+          "gs_ui/Code/Source/GS_UIManagerSystemComponent.cpp",
+          "gs_unit/Code/Source/Unit/GS_UnitManagerSystemComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "rename-evaluatecurve", "type": "rename", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Utility/Math/CurvesUtility.h",
+      "anchor": "float EvaluateCurve(CurveType curve, float t);", "token": "EvaluateCurve",
+      "expect": {
+        "minFiles": 6,
+        "mustIncludeFileSuffixes": [
+          "gs_audiopro/Code/Source/Score/ScoreLayerRule.cpp",
+          "gs_phantomcam/Code/Source/Core/GS_CamCoreComponent.cpp",
+          "gs_core/Code/Source/Utility/Math/CurvesUtility.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "rename-booleancomparison-s32", "type": "rename", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_cinematics/Code/Source/Dialogue/Conditions/Record_DialogueCondition.cpp",
+      "anchor": "return GS_Core::BooleanComparison(sysValue, RecordData.recordProgress, condition);", "token": "BooleanComparison",
+      "expect": {
+        "minFiles": 3,
+        "mustIncludeFileSuffixes": [
+          "gs_core/Code/Include/GS_Core/Utility/ComparisonUtility.h",
+          "gs_cinematics/Code/Source/Dialogue/Conditions/Record_DialogueCondition.cpp",
+          "gs_interaction/Code/Source/WorldTriggers/SensorTypes/Record_SensorType.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "rename-onused-virtual", "type": "rename", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h",
+      "anchor": "virtual void OnUsed(", "token": "OnUsed",
+      "expect": {
+        "minFiles": 5,
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/Items/ItemComponents/GivesStock_ItemComponent.cpp",
+          "Gem/Source/SandboxHeal_ItemComponent.cpp",
+          "gs_item/Code/Source/Items/ItemHooks.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "rename-onsessionengage-virtual", "type": "rename", "part": "workspaceGems", "category": "gs_core->gems",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h",
+      "anchor": "virtual void OnSessionEngage() { ReportReady(); }", "token": "OnSessionEngage",
+      "expect": {
+        "minFiles": 10,
+        "mustIncludeFileSuffixes": [
+          "gs_item/Code/Source/GS_ItemManagerSystemComponent.cpp",
+          "gs_ui/Code/Source/GS_UIManagerSystemComponent.cpp",
+          "gs_unit/Code/Source/Unit/GS_UnitManagerSystemComponent.cpp"
+        ]
+      },
+      "expectedBuilt": true
+    },
+
+    // ---- relationships: code actions -----------------------------------------------
+    {
+      "id": "action-override-uimotiontrack", "type": "codeAction", "part": "workspaceGems", "category": "code action",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Motion/UiMotionTrack.h",
+      "anchor": "class UiMotionTrack", "token": "UiMotionTrack",
+      "expect": { "titleIncludes": "override" }, "expectedBuilt": true
+    },
+    {
+      "id": "action-override-feedbackmotiontrack", "type": "codeAction", "part": "workspaceGems", "category": "code action",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/Interfaces/Motion/FeedbackMotionTrack.h",
+      "anchor": "class FeedbackMotionTrack", "token": "FeedbackMotionTrack",
+      "expect": { "titleIncludes": "override" }, "expectedBuilt": true
+    },
+    {
+      "id": "action-override-uioptionproxy", "type": "codeAction", "part": "workspaceGems", "category": "code action",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_ui/Code/Include/GS_UI/UIOptions/UiOptionProxy.h",
+      "anchor": "class UiOptionProxy", "token": "UiOptionProxy",
+      "expect": { "titleIncludes": "override" }, "expectedBuilt": true
+    },
+    {
+      "id": "action-override-entityoptionproxy", "type": "codeAction", "part": "workspaceGems", "category": "code action",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_Options/Options/OptionProxy/OptionProxy.h",
+      "anchor": "class EntityOptionProxy", "token": "EntityOptionProxy",
+      "expect": { "titleIncludes": "override" }, "expectedBuilt": true
+    },
+    {
+      "id": "action-deduced-type-console", "type": "codeAction", "part": "workspaceGems", "category": "code action",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Options/Options/CoreApplyTargets.cpp",
+      "anchor": "auto* console = AZ::Interface<AZ::IConsole>::Get();", "token": "auto",
+      "expect": { "titleIncludes": "deduced type" }, "expectedBuilt": true
+    },
+
+    // ---- relationships: completion after :: and -> ---------------------------------
+    {
+      "id": "complete-engine-tickbus-handler-members", "type": "completion", "part": "workspaceGems", "category": "completion",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_GameManagerComponent.cpp",
+      "anchor": "AZ::TickBus::Handler::BusConnect();", "token": "::", "occurrence": 2, "afterToken": true,
+      "expect": {
+        "labelsInclude": [
+          "BusConnect",
+          "BusDisconnect",
+          "OnTick"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "complete-engine-entity-members", "type": "completion", "part": "workspaceGems", "category": "completion",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_interaction/Code/Source/WorldTriggers/TriggerTypes/ToggleEntities_TriggerType.cpp",
+      "anchor": "if (on) { entity->Activate();   }", "token": "->", "afterToken": true,
+      "expect": {
+        "labelsInclude": [
+          "Activate",
+          "Deactivate",
+          "GetId"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "complete-gs_core-namespace-from-item-gem", "type": "completion", "part": "workspaceGems", "category": "completion",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_item/Code/Source/Items/ItemComponents/GivesStock_ItemComponent.cpp",
+      "anchor": "&GS_Core::InventoryExchange::AddStock, m_stockType, GetStockFor(1));", "token": "::", "afterToken": true,
+      "expect": {
+        "labelsInclude": [
+          "InventoryExchange",
+          "ItemComponentType",
+          "ItemContext"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "complete-gs_core-inventoryexchange-members", "type": "completion", "part": "workspaceGems", "category": "completion",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_item/Code/Source/Items/ItemComponents/GivesStock_ItemComponent.cpp",
+      "anchor": "&GS_Core::InventoryExchange::AddStock, m_stockType, GetStockFor(1));", "token": "::", "occurrence": 1, "afterToken": true,
+      "expect": {
+        "labelsInclude": [
+          "AddStock",
+          "GetStock"
+        ]
+      },
+      "expectedBuilt": true
+    },
+    {
+      "id": "complete-engine-assetmanager-statics", "type": "completion", "part": "workspaceGems", "category": "completion",
+      "file": "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/GS_Manager/GS_GameManagerComponent.cpp",
+      "anchor": "AZ::Data::AssetManager& assetManager = AZ::Data::AssetManager::Instance();", "token": "::", "occurrence": 4, "afterToken": true,
+      "expect": {
+        "labelsInclude": [
+          "Instance",
+          "IsReady",
+          "Destroy"
+        ]
+      },
+      "expectedBuilt": true
+    }
+  ],
+
+  "symbols": [
+    { "query": "SandboxHealthComponent", "expectFileSuffix": "Gem/Source/SandboxHealthComponent.h" },
+    { "query": "SandboxLogNotify", "expectFileSuffix": "Gem/Source/SandboxLogNotify.h" },
+    { "query": "GS_PlaySystemComponent", "expectFileSuffix": "Gem/Source/GS_PlaySystemComponent.h" },
+    { "query": "GS_PlayRequestBus", "expectFileSuffix": "Gem/Include/GS_Play/GS_PlayBus.h" },
+    { "query": "ItemComponentType", "expectFileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/ItemComponentType.h" },
+    { "query": "InventoryExchange", "expectFileSuffix": "gs_core/Code/Include/GS_Core/Interfaces/Item/InventoryExchangeBus.h" },
+    { "query": "GS_ManagerSystemComponent", "expectFileSuffix": "gs_core/Code/Include/GS_Core/GS_Manager/GS_ManagerSystemComponent.h" },
+    { "query": "StockWallet", "expectFileSuffix": "gs_item/Code/Include/GS_Item/Stock/StockWallet.h" },
+    { "query": "StateNotify", "expectFileSuffix": "gs_graphcanvas/Code/Include/GS_GraphCanvas/Nodes/StateNotify.h" },
+    { "query": "PerformerAnimatorComponent", "expectFileSuffix": "gs_performer/Code/Include/GS_Performer/Animation/Animator/PerformerAnimatorComponent.h" },
+    { "query": "SetCamPriority_DialogueEffectComponent", "expectFileSuffix": "gs_complete/Code/Include/GS_Complete/GS_Cinematics/Dialogue/Effects/SetCamPriority_DialogueEffectComponent.h" },
+    { "query": "GS_UIManagerComponent", "expectFileSuffix": "gs_ui/Code/Include/GS_UI/GS_UIManagerComponent.h" },
+    { "query": "VegetationInstanceFeatureProcessor", "expectFileSuffix": "gs_environment/Code/Source/Render/VegetationInstanceFeatureProcessor.h" },
+    { "query": "AZ::Component", "expectFileSuffix": "AzCore/Component/Component.h" },
+    { "query": "AZ::EntityId", "expectFileSuffix": "AzCore/Component/EntityId.h" },
+    { "query": "AZ::Uuid", "expectFileSuffix": "AzCore/Math/Uuid.h" },
+    { "query": "AZ::EBusTraits", "expectFileSuffix": "AzCore/EBus/EBus.h" },
+    { "query": "AZ::Entity::Activate", "expectFileSuffix": "AzCore/Component/Entity.cpp" },
+    { "query": "AZ::Utils::WriteFile", "expectFileSuffix": "AzCore/Utils/Utils.cpp" }
+  ]
+}

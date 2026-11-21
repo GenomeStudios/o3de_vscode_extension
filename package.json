@@ -41,6 +41,28 @@
           "scope": "resource",
           "markdownDescription": "On activation, regenerate C++ IntelliSense (`c_cpp_properties.json`) from the latest CMake File API reply. Low cost — re-parses the existing reply, does **not** run a CMake configure. Turn off to update only via the **O3DE: Generate C++ IntelliSense** command."
         },
+        "o3de.intellisense.engineCoverage": {
+          "type": "string",
+          "enum": [
+            "participating",
+            "framework",
+            "off"
+          ],
+          "enumDescriptions": [
+            "The engine's Framework modules your project includes, plus the engine gems it uses.",
+            "Only the engine's Framework modules your project includes.",
+            "No engine sources: only your project, your gems and the gem sources outside the build."
+          ],
+          "default": "participating",
+          "scope": "resource",
+          "markdownDescription": "How much **engine source** clangd indexes, for a project built against a prebuilt (SDK) engine with a source engine in the workspace. **participating** (default): the Framework modules your project includes, plus every engine gem it uses (found from your project's own include paths). **framework**: only the Framework modules. **off**: no engine sources, the lightest on a slow machine. Your gems' sources that the build doesn't list always get entries. Applies to the clangd compile database only; it updates itself when you change this."
+        },
+        "o3de.intellisense.compileDatabase": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Bring your **own clangd compile database**. Leave empty (the default) and O3DE generates one from the project's CMake configure. Or set the path to a `compile_commands.json`, or to the folder that holds one: absolute, or relative to the project (e.g. `compile_commands.json`, `build/windows`). clangd's `--compile-commands-dir` then points at that folder, and O3DE **never writes it**: no generation, no sync, and `#o3de.intellisense.engineCoverage#` doesn't apply. O3DE only points clangd at it, so any other clangd arguments (such as `--query-driver`) are yours to set. If the path holds no `compile_commands.json`, O3DE says so and generates its own instead. A `compile_commands.json` in the project or its build folder is never picked up by itself, because it may be out of date: the IntelliSense status shows a hint when one exists. Takes effect straight away when clangd is already running on a database O3DE pointed it at."
+        },
         "o3de.run.toggleToQuit": {
           "type": "boolean",
           "default": true,
@@ -288,6 +310,10 @@
       {
         "command": "o3de.showClangdDatabaseStatus",
         "title": "O3DE: Show clangd Compile Database Status"
+      },
+      {
+        "command": "o3de.checkIntelliSenseHealth",
+        "title": "O3DE: Check IntelliSense Health"
       },
       {
         "command": "o3de.selectGenerator",

@@ -3,6 +3,103 @@
 All notable changes to the **O3DE Development Tools** extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [pending_version] — 2026-11-21
+
+### Added
+
+- **IntelliSense now covers the engine gems your project uses, not only the engine Framework.**
+  With a prebuilt (SDK) engine and a source engine in your workspace, the clangd database used to
+  hold only the engine's `Code/Framework` sources. It now also holds the sources of every engine gem
+  your project takes part in (Atom, EMotionFX, LyShine and so on), so clangd can navigate into them.
+  The gems are found from the include paths of your own code, so there is no list to maintain. Each
+  gem is compiled with your project's switches, its own `Include`, `Source` and platform folders, and
+  the include directories its own `CMakeLists.txt` files declare, so you need no non-unity build and
+  no extra configure.
+  Gem sources that no build target lists (a gem with a legacy file list, or one on disk that isn't
+  enabled in the project) are covered too, instead of getting flags guessed from an unrelated file.
+  That includes your own gems, the `external_subdirectories` of `project.json`, and the manifest gems
+  your project enables or your workspace contains. A gem that is only registered on your machine is
+  left out, so your database never changes with what else you have registered.
+  The first index takes longer, because there is more engine code to read. The setting below limits it.
+- **New setting `o3de.intellisense.engineCoverage`** sets how much engine source clangd indexes:
+  `participating` (the default: the Framework modules your project includes plus the engine gems
+  it uses), `framework` (the Framework modules only, as before) or `off` (no engine sources, the
+  lightest on a slow machine). The database updates itself when you change it.
+  `o3de_update_clangd_database` takes an optional `engineCoverage` to override it for one run.
+- **Bring your own compile database.** A `compile_commands.json` you copied into the project
+  used to be ignored, because the extension always pointed clangd at its own generated database.
+  The new setting `o3de.intellisense.compileDatabase` takes the path to a `compile_commands.json`,
+  or to the folder holding one, absolute or relative to the project. clangd then reads that file and
+  O3DE never writes to it: no generation, no sync, and the engine coverage setting doesn't apply. If
+  the path holds no `compile_commands.json`, the log and the status say so and O3DE generates its
+  own database instead. Leave the setting empty (the default) and nothing changes.
+  Changing the setting re-points a clangd that O3DE had pointed; with the C/C++ extension running as
+  well, that is left to **O3DE: Select IntelliSense Engine**. A clangd you pointed yourself is never
+  touched. A `compile_commands.json` found in the project folder or its build folder but not chosen
+  is only offered: `o3de_intellisense_status` shows a `hint` naming the setting, and so does the
+  clangd Database row while clangd uses O3DE's database. No hint is shown when your own
+  `clangd.arguments` already point clangd at that file's folder.
+  `o3de_set_intellisense_engine` takes an optional `compileDatabase` (a path, or an empty string to
+  remove the project folder's value and return to the generated database, unless your User or
+  Workspace settings still name one). It is stored as the workspace-folder setting and stays stored
+  if the switch fails (`settingWritten: true`); the result's `compileDatabase` says which database
+  applies. `o3de_update_clangd_database` answers `ran: false` with reason `userDatabase` while
+  clangd reads your own database.
+- **O3DE: Check IntelliSense Health** shows what fails on your own machine. It runs `clangd --check`
+  on a repeatable sample of files from the database clangd reads (O3DE's or yours: project, gem,
+  engine Framework, engine gem and fallback entries, plus up to two sources the database has no
+  entry for) and opens an untitled Markdown report you can paste into an issue. For each file it
+  gives the real compile errors and whether clangd used the file's own entry or borrowed another's
+  flags. It also reports the extension and clangd versions, which clangd binary runs and where it
+  was found, the compiler and switch style, which database is in use, how many of its include
+  directories don't exist on disk, and the engine mode. Plain sentences say what is wrong and what
+  to do. If clangd is a `.cmd` or `.bat` wrapper, the report says it could not be run and tells you
+  to point `clangd.path` at `clangd.exe`. It builds no index and writes nothing.
+- **`o3de_intellisense_health`**, the same check for an assistant. The read-only MCP tool takes
+  `sampleSize` (1 to 20, default 6) and `includeEntryless` (default true) and returns the report as
+  JSON with a one-line summary. It streams progress, and stops within 5 minutes (45 seconds for a
+  client that sends no progress token). With no O3DE project open it refuses at once.
+- **`o3de_intellisense_status` says what is in the clangd database and which one clangd uses.**
+  `clangdDatabase.last` counts the entries by `origins` (project, gem, engineFramework, engineGems,
+  fallback), the engine sources that carry their module's export defines (`engineModuleDefines`),
+  and the registered gems left out (`skippedManifestGems`); `engineEntries` now counts every engine
+  source, gems included. `clangdDatabase.selection` gives `source` (`generated` or `user`), your
+  setting, the folder and file of your own database, a `hint` for one found but not chosen, and a
+  `reason` sentence. `selection.missing` is set when the setting names nothing usable.
+  `clangdDatabase.state` is `userProvided` while clangd reads your own database, shown as
+  **User-provided** in the dashboard row. That row normally appears only while clangd uses O3DE's
+  database; it also appears for a `compileDatabase` setting you have written before clangd is
+  switched on, or one that names a missing file. `clangdDatabase.last.engineCoverage` and a
+  top-level `engineCoverage` report the engine coverage setting.
+  `o3de_set_intellisense_engine` returns the same counts and selection, and the dashboard's clangd
+  Database detail says them in words.
+
+### Changed
+
+- **clangd is allowed to ask a GNU-style compiler for its system includes.** When you switch to
+  clangd and the project's compiler is g++ or clang++, `--query-driver=<compiler>` is added to
+  clangd's arguments. Any `--query-driver` globs you already set are kept and extended, and nothing
+  is added when you use your own compile database.
+
+### Fixed
+
+- **Linux and macOS: clangd showed errors on every gem and project file** (#27). The generated
+  database wrote Windows compiler switches (`/D`, `/I`, `/TP`) whatever the compiler, so clangd saw
+  no include paths or defines at all. Entries now use the compiler's own syntax: `cl` and
+  `clang-cl` keep the Windows switches, and anything else (clang++, g++) gets `-D`, `-I`,
+  `-isystem <dir>` and `-x c++`.
+- **Engine source files no longer show dllimport errors and warnings in clangd.** Every engine
+  source used to share one command built for a consumer of the engine, where a module's API macros
+  mean `dllimport`, so nearly every engine file warned and a file defining a static member of an
+  exported class failed outright. Each engine source now also gets the export defines of the module
+  that owns it (`AZCORE_EXPORTS`, `AZF_EXPORTS`...), read from the `CMakeLists.txt` of the source
+  engine in your workspace, so a module of your own engine needs no setting.
+- **clang-only warnings are no longer red in clangd.** `/WX`, `-WX`, `-Werror` and `-Werror=<x>`
+  are dropped from every entry (`-Wno-error=<x>` stays), so a warning that cl or gcc never raises
+  (`-Wswitch`, for one) stays a warning. Your real build still enforces its own flags.
+- **macOS source engines skip the Windows and Linux platform folders.** The engine source list
+  knew which folders to skip on Windows and Linux only; on macOS it now takes `Platform/Mac`.
+
 ## [0.4.2] — 2026-11-21
 
 ### Added

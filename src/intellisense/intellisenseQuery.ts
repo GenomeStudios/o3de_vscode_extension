@@ -15,9 +15,10 @@ import * as vscode from "vscode";
 import { BuildOptions } from "../build/buildOptions";
 import { CLANGD_EXTENSION_ID, CPPTOOLS_EXTENSION_ID } from "../constants";
 import { detectClangd } from "../deps/detectors";
-import { EngineSwitchResult, cppToolsStopsAfterReload, switchEngine } from "./clangdMode";
+import { EngineSwitchResult, cppToolsStopsAfterReload, readEngineCoverage, switchEngine } from "./clangdMode";
 import { DatabaseStatus, databaseDetail, databaseLabel } from "./clangdDatabase";
 import { SyncOutcome, syncClangdDatabase } from "./clangdSync";
+import { EngineCoverage, engineCoverageDetail } from "./databasePlan";
 import { EngineModeReport, engineModeDetail, engineModeLabel } from "./engineMode";
 import { CppFreshness, LuaFreshness, cppFreshnessDetail, cppFreshnessLabel, luaFreshnessDetail, luaFreshnessLabel } from "./freshness";
 import { EngineChoice, RunningEngine, runningEngineDetail, runningEngineLabel } from "./intellisenseEngine";
@@ -43,7 +44,10 @@ export interface IntelliSenseReport {
     cppTools: ExtensionInstall;
     clangd: ExtensionInstall & { server: { found: boolean; detail: string } }; // the onboarding row's staged state
   };
-  clangdDatabase: DatabaseStatus & { label: string; detail: string }; // state notInUse unless clangd uses O3DE's database
+  // state notInUse unless clangd uses the selected database; last.origins counts entries by origin; selection says which
+  // database is selected — generated, or the user's own (o3de.intellisense.compileDatabase) — and why, with any hint or missing file
+  clangdDatabase: DatabaseStatus & { label: string; detail: string };
+  engineCoverage: { setting: EngineCoverage; detail: string }; // o3de.intellisense.engineCoverage: how much engine source the database holds
   engineSources: EngineModeReport & { label: string; detail: string };
   cppData: CppFreshness & { label: string; detail: string };
   luaReflection: LuaFreshness & { label: string; detail: string };
@@ -55,6 +59,7 @@ export async function intellisenseReport(buildOptions: BuildOptions): Promise<In
   const { running, inputs } = snapshot.activeEngine;
   const clangd = extensionInstall(CLANGD_EXTENSION_ID);
   const server = clangd.installed ? await detectClangd() : undefined;
+  const engineCoverage = readEngineCoverage();
   return {
     engine: {
       running,
@@ -78,6 +83,7 @@ export async function intellisenseReport(buildOptions: BuildOptions): Promise<In
       label: databaseLabel(snapshot.clangdDatabase),
       detail: databaseDetail(snapshot.clangdDatabase),
     },
+    engineCoverage: { setting: engineCoverage, detail: engineCoverageDetail(engineCoverage) },
     engineSources: { ...snapshot.engine, label: engineModeLabel(snapshot.engine), detail: engineModeDetail(snapshot.engine) },
     cppData: { ...snapshot.cpp, label: cppFreshnessLabel(snapshot.cpp), detail: cppFreshnessDetail(snapshot.cpp) },
     luaReflection: { ...snapshot.lua, label: luaFreshnessLabel(snapshot.lua), detail: luaFreshnessDetail(snapshot.lua) },
@@ -85,18 +91,27 @@ export async function intellisenseReport(buildOptions: BuildOptions): Promise<In
 }
 
 // ---- Switch (set) ----------------------------------------------------------
-/** Make `engine` the running C++ IntelliSense engine for this workspace (never installs anything). */
+/**
+ * Make `engine` the running C++ IntelliSense engine for this workspace (never installs anything).
+ * `compileDatabase`, when given, is stored as o3de.intellisense.compileDatabase first: a compile_commands.json, its
+ * folder (absolute, or relative to the project), or "" for the generated database.
+ */
 export function setIntelliSenseEngine(
   buildOptions: BuildOptions,
   workspaceState: vscode.Memento,
   engine: EngineChoice,
+  compileDatabase?: string,
 ): Promise<EngineSwitchResult> {
-  return switchEngine(engine, buildOptions, workspaceState);
+  return switchEngine(engine, buildOptions, workspaceState, compileDatabase);
 }
 
-/** Regenerate clangd's compile database now (only while clangd uses it); restarts clangd if it changed. */
-export function updateClangdDatabase(buildOptions: BuildOptions): Promise<SyncOutcome> {
-  return syncClangdDatabase(buildOptions, "mcp");
+/**
+ * Regenerate clangd's compile database now (only while clangd uses it); restarts clangd if it changed.
+ * A user-provided database is never regenerated (ran: false, reason userDatabase).
+ * `engineCoverage` overrides the setting for this one run — the next automatic update goes back to the setting.
+ */
+export function updateClangdDatabase(buildOptions: BuildOptions, engineCoverage?: EngineCoverage): Promise<SyncOutcome> {
+  return syncClangdDatabase(buildOptions, "mcp", engineCoverage);
 }
 
 // ---- Internal --------------------------------------------------------------

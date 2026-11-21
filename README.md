@@ -39,8 +39,12 @@ with live status, Build/Run, utilities, and collapsible Configuration & Onboardi
   app's logs, and read/change build config — per-project, off by default, localhost-bound.
 - **Class Creation Wizard** — launch O3DE's component/EBus class-scaffolding tool for the project's
   engine straight from the panel.
-- **C++ IntelliSense** — generates `c_cpp_properties.json` from the CMake File API and registers a
-  live cpptools configuration provider; engine paths resolve to your source engine.
+- **C++ IntelliSense** — works with the Microsoft C/C++ extension (a live configuration provider)
+  or with **clangd** (a compile database the extension generates). Both read your project's own
+  CMake data, so no non-unity build and no extra configure are needed. With a prebuilt engine and
+  its source engine in the workspace, navigation reaches the engine's Framework **and the engine
+  gems your project uses**, alongside your project and every gem it builds. See
+  [C++ IntelliSense](#c-intellisense) below.
 - **Project config generation** — `.vscode` `settings.json` + `launch.json` (Editor / GameLauncher /
   Attach / Class Creation Wizard) + O3DE code snippets.
 - **Quick access** — Editor / Error logs, the extension output channel, and keybindings for Build
@@ -55,6 +59,27 @@ with live status, Build/Run, utilities, and collapsible Configuration & Onboardi
 - **Lua function palette** — a browsable, searchable *Classes / EBuses / Globals* tree in the O3DE
   activity bar (the VS Code equivalent of the Lua IDE's Class Reference panel). Click a symbol to
   insert a call snippet. Opens automatically when O3DE hands a script over.
+
+### C++ IntelliSense
+
+1. Open the project's workspace. For navigation into engine code with a prebuilt (SDK) engine, add
+   the matching **source engine** folder to the workspace. A close version is fine.
+2. Configure the project once (**Configure Project** on the dashboard).
+3. Pick an engine with **O3DE: Select IntelliSense Engine**: the Microsoft C/C++ extension, or
+   clangd (the only option in VSCodium, Cursor and other non-Microsoft editors). clangd's first
+   index takes a while on a large project, and later starts reuse it.
+
+With clangd, the extension writes the compile database for you. It covers your project's files,
+every gem the project builds, gem sources that no build target lists, and, with a source engine in
+the workspace, the engine's Framework and the engine gems your project uses. Two settings adjust it:
+
+- `o3de.intellisense.engineCoverage`: `participating` (default), `framework` or `off`, to index less
+  engine code on a slow machine.
+- `o3de.intellisense.compileDatabase`: the path to a `compile_commands.json` of your own. clangd
+  then reads that file, and the extension never overwrites it.
+
+If something still shows errors, run **O3DE: Check IntelliSense Health**. It checks a sample of
+your files with clangd and opens a report saying what fails and why. Paste it into an issue.
 
 ### Debugging Lua
 

@@ -160,6 +160,33 @@ export function withCompileCommandsDir(args: string[] | undefined, dir: string):
   return [...kept, `${COMPILE_COMMANDS_DIR}=${dir}`];
 }
 
+const QUERY_DRIVER = "--query-driver";
+
+/**
+ * `args` with `compiler` among clangd's allowed drivers, so clangd asks it for its system include dirs (a GNU
+ * compiler's own headers — libstdc++ and friends — are otherwise invisible to it). clangd takes ONE comma-separated
+ * glob list: the user's own globs are kept and extended, never replaced. Every other argument is kept, in order.
+ */
+export function withQueryDriver(args: string[], compiler: string): string[] {
+  const kept: string[] = [];
+  const globs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === QUERY_DRIVER) {
+      globs.push(...(args[i + 1] ?? "").split(",")); // detached value
+      i += 1;
+    } else if (arg.startsWith(`${QUERY_DRIVER}=`)) {
+      globs.push(...arg.slice(QUERY_DRIVER.length + 1).split(","));
+    } else {
+      kept.push(arg);
+    }
+  }
+  if (!globs.includes(compiler)) {
+    globs.push(compiler);
+  }
+  return [...kept, `${QUERY_DRIVER}=${globs.filter(Boolean).join(",")}`];
+}
+
 // ---- Write plan ------------------------------------------------------------
 export interface PlanInputs {
   cppToolsInstalled: boolean;
@@ -172,6 +199,8 @@ export interface PlanInputs {
   prior: PriorValues;
   /** Where O3DE's compile database lives (clangd choice only). */
   databaseDir?: string;
+  /** A GNU-style compiler clangd should query for its system include dirs (clangd choice only; none for cl / clang-cl). */
+  queryDriver?: string;
 }
 
 export interface EnginePlan {
@@ -184,7 +213,8 @@ export interface EnginePlan {
  * The workspace writes that make `choice` the running engine.
  *
  *   clangd   → C/C++ IntelliSense "disabled" (if installed); clangd.enable restored if O3DE had switched it off, and
- *              set true only if it would still be off; clangd.arguments pointed at O3DE's compile database.
+ *              set true only if it would still be off; clangd.arguments pointed at O3DE's compile database (and, for a
+ *              GNU-style compiler, allowed to query that compiler for its system include dirs).
  *   cpptools → the C/C++ and clangd.arguments keys restored to what they were before O3DE; clangd.enable false
  *              (if clangd is installed).
  *
@@ -223,7 +253,8 @@ export function planEngine(choice: EngineChoice, inputs: PlanInputs): EnginePlan
     }
     if (inputs.databaseDir) {
       const current = workspaceNow["clangd.arguments"];
-      set("clangd.arguments", withCompileCommandsDir(Array.isArray(current) ? (current as string[]) : undefined, inputs.databaseDir));
+      const withDatabase = withCompileCommandsDir(Array.isArray(current) ? (current as string[]) : undefined, inputs.databaseDir);
+      set("clangd.arguments", inputs.queryDriver ? withQueryDriver(withDatabase, inputs.queryDriver) : withDatabase);
     }
   } else {
     restore("C_Cpp.intelliSenseEngine");

@@ -1,0 +1,23 @@
+I[04:28:27.275] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)
+I[04:28:27.275] Features: windows+grpc
+I[04:28:27.275] PID: 39132
+I[04:28:27.275] Working directory: D:\ib\scratch
+I[04:28:27.275] argv[0]: C:\Users\user\AppData\Roaming\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\22.1.6\clangd_22.1.6\bin\clangd.exe
+I[04:28:27.275] argv[1]: --check=D:/OffLocalDev/gs_play_gems/gs_audio/Code/Source/AudioEvents/AudioInstance.cpp
+I[04:28:27.275] argv[2]: --compile-commands-dir=D:/ib/scratch/db
+I[04:28:27.279] Entering check mode (no LSP server)
+I[04:28:27.279] Testing on source file D:\OffLocalDev\gs_play_gems\gs_audio\Code\Source\AudioEvents\AudioInstance.cpp
+I[04:28:27.280] Loading compilation database...
+I[04:28:27.437] Loaded compilation database from D:/ib/scratch/db\compile_commands.json
+I[04:28:27.438] <long line trimmed>
+I[04:28:27.438] Parsing command...
+I[04:28:27.447] <long line trimmed>
+I[04:28:27.448] Building preamble...
+I[04:28:29.798] Built preamble of size 26566132 for file D:\OffLocalDev\gs_play_gems\gs_audio\Code\Source\AudioEvents\AudioInstance.cpp version null in 2.35 seconds
+I[04:28:29.798] Indexing headers...
+I[04:28:30.295] Building AST...
+I[04:28:30.357] Indexing AST...
+I[04:28:30.359] Building inlay hints
+I[04:28:30.359] Building semantic highlighting
+I[04:28:30.359] Testing features at each token (may be slow in large files)
+I[04:28:30.894] All checks completed, 0 errors

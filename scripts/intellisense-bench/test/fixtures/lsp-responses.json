@@ -1,0 +1,46 @@
+{
+  "referencesVirtualCall": [
+    {"range":{"end":{"character":28,"line":12},"start":{"character":24,"line":12}},"uri":"file:///D:/zoo/src/zoo.cpp"}
+  ],
+  "referencesClass": [
+    {"range":{"end":{"character":25,"line":7},"start":{"character":17,"line":7}},"uri":"file:///d:/zoo/include/creature.h"},
+    {"range":{"end":{"character":32,"line":5},"start":{"character":24,"line":5}},"uri":"file:///D:/zoo/include/bird.h"},
+    {"range":{"end":{"character":25,"line":7},"start":{"character":17,"line":7}},"uri":"file:///D:/zoo/include/creature.h"},
+    {"range":{"end":{"character":31,"line":5},"start":{"character":23,"line":5}},"uri":"file:///D:/zoo/include/dog.h"},
+    {"range":{"end":{"character":16,"line":4},"start":{"character":8,"line":4}},"uri":"file:///D:/zoo/src/creature.cpp"},
+    {"range":{"end":{"character":32,"line":6},"start":{"character":24,"line":6}},"uri":"file:///D:/zoo/src/zoo.cpp"},
+    {"range":{"end":{"character":32,"line":10},"start":{"character":24,"line":10}},"uri":"file:///D:/zoo/src/zoo.cpp"}
+  ],
+  "implementationPureVirtual": [
+    {"range":{"end":{"character":19,"line":9},"start":{"character":14,"line":9}},"uri":"file:///D:/zoo/src/bird.cpp"},
+    {"range":{"end":{"character":18,"line":4},"start":{"character":13,"line":4}},"uri":"file:///D:/zoo/src/dog.cpp"}
+  ],
+  "prepareTypeHierarchy": [
+    {"kind":5,"name":"Creature","range":{"end":{"character":5,"line":10},"start":{"character":4,"line":4}},"selectionRange":{"end":{"character":18,"line":4},"start":{"character":10,"line":4}},"uri":"file:///d:/zoo/include/creature.h"}
+  ],
+  "subtypesOfCreature": [
+    {"detail":"selftest::Dog","kind":5,"name":"Dog","range":{"end":{"character":13,"line":5},"start":{"character":10,"line":5}},"selectionRange":{"end":{"character":13,"line":5},"start":{"character":10,"line":5}},"uri":"file:///D:/zoo/include/dog.h"},
+    {"detail":"selftest::Bird","kind":5,"name":"Bird","range":{"end":{"character":14,"line":5},"start":{"character":10,"line":5}},"selectionRange":{"end":{"character":14,"line":5},"start":{"character":10,"line":5}},"uri":"file:///D:/zoo/include/bird.h"},
+    {"detail":"selftest::Lazy","kind":5,"name":"Lazy","range":{"end":{"character":14,"line":6},"start":{"character":10,"line":6}},"selectionRange":{"end":{"character":14,"line":6},"start":{"character":10,"line":6}},"uri":"file:///D:/zoo/src/zoo.cpp"}
+  ],
+  "subtypesOfDog": [
+    {"detail":"selftest::Puppy","kind":5,"name":"Puppy","range":{"end":{"character":15,"line":5},"start":{"character":10,"line":5}},"selectionRange":{"end":{"character":15,"line":5},"start":{"character":10,"line":5}},"uri":"file:///D:/zoo/include/puppy.h"}
+  ],
+  "subtypesOfBird": [],
+  "prepareCallHierarchy": [
+    {"kind":12,"name":"Area","range":{"end":{"character":5,"line":12},"start":{"character":4,"line":9}},"selectionRange":{"end":{"character":12,"line":9},"start":{"character":8,"line":9}},"uri":"file:///d:/zoo/src/shape.cpp"}
+  ],
+  "incomingCallsOfArea": [
+    {"from":{"detail":"main","kind":12,"name":"main","range":{"end":{"character":8,"line":2},"start":{"character":4,"line":2}},"selectionRange":{"end":{"character":8,"line":2},"start":{"character":4,"line":2}},"uri":"file:///d:/zoo/src/main.cpp"},"fromRanges":[{"end":{"character":25,"line":5},"start":{"character":21,"line":5}}]}
+  ],
+  "prepareRename": {"placeholder":"Area","range":{"end":{"character":12,"line":9},"start":{"character":8,"line":9}}},
+  "renameArea": {"changes":{"file:///D:/zoo/include/shape.h":[{"newText":"Area_BenchRename","range":{"end":{"character":12,"line":4},"start":{"character":8,"line":4}}}],"file:///D:/zoo/src/main.cpp":[{"newText":"Area_BenchRename","range":{"end":{"character":25,"line":5},"start":{"character":21,"line":5}}}],"file:///d:/zoo/src/main.cpp":[{"newText":"Area_BenchRename","range":{"end":{"character":25,"line":5},"start":{"character":21,"line":5}}}],"file:///d:/zoo/src/shape.cpp":[{"newText":"Area_BenchRename","range":{"end":{"character":12,"line":9},"start":{"character":8,"line":9}}}]}},
+  "prepareRenameRefused": {"error":"textDocument/prepareRename: Cannot rename symbol: there is no symbol at the given location","rpcError":{"code":-32001,"message":"Cannot rename symbol: there is no symbol at the given location"}},
+  "codeActionLazy": [
+    {"command":{"command":"clangd.applyTweak","title":"Override pure virtual methods"},"isPreferred":true,"kind":"quickfix","title":"Override pure virtual methods"},
+    {"command":{"command":"clangd.applyTweak","title":"Declare implicit copy/move members"},"kind":"refactor","title":"Declare implicit copy/move members"}
+  ],
+  "codeActionNone": [],
+  "completionAfterDot": {"isIncomplete":false,"items":[{"detail":"int","filterText":"Size","kind":2,"label":" Size() const"}]},
+  "completionAfterScope": {"isIncomplete":false,"items":[{"filterText":"Widget","kind":7,"label":" Widget"},{"detail":"int","filterText":"Area","kind":3,"label":" Area(int width, int height)"},{"additionalTextEdits":[{"newText":"#include \"creature.h\"\n","range":{"end":{"character":0,"line":0},"start":{"character":0,"line":0}}}],"filterText":"Creature","kind":7,"label":"•Creature"},{"additionalTextEdits":[{"newText":"#include \"bird.h\"\n","range":{"end":{"character":0,"line":0},"start":{"character":0,"line":0}}}],"filterText":"Bird","kind":7,"label":"•Bird"},{"additionalTextEdits":[{"newText":"#include \"dog.h\"\n","range":{"end":{"character":0,"line":0},"start":{"character":0,"line":0}}}],"filterText":"Dog","kind":7,"label":"•Dog"},{"additionalTextEdits":[{"newText":"#include \"puppy.h\"\n","range":{"end":{"character":0,"line":0},"start":{"character":0,"line":0}}}],"filterText":"Puppy","kind":7,"label":"•Puppy"},{"filterText":"Widget","kind":4,"label":" Widget(Widget &&)"},{"filterText":"Widget","kind":4,"label":" Widget(const Widget &)"},{"filterText":"Widget","kind":4,"label":" Widget(int size)"}]}
+}

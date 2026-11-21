@@ -312,7 +312,26 @@ suite("compileDb engine source entries", () => {
     const commands = buildCompileDatabase(reply([runtime, editor]), mappings, [projectFile]);
     const entries = commands.filter((c) => c.file === projectFile);
     assert.strictEqual(entries.length, 1);
-    assert.ok(entries[0].arguments.includes("/WX"), "it's the project's own command, /WX and all");
+    assert.ok(entries[0].arguments.includes("/DGS_Core_EXPORTS"), "it's the project's own command (its own define, not the agreed set)");
+  });
+
+  test("/WX is dropped from the project's own entries too — clang-only warnings must never be red", () => {
+    const projectFile = "D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/CoreSystem.cpp";
+    const entry = buildCompileDatabase(reply([runtime, editor]), mappings).find((c) => c.file === projectFile)!;
+    assert.ok(!entry.arguments.includes("/WX"));
+    assert.ok(entry.arguments.includes("/W4") && entry.arguments.includes("/permissive-"), "other switches stay");
+  });
+
+  test("with a module lookup, an engine file gets its module's export defines right after the agreed ones", () => {
+    const lookup = (file: string): string[] => (file.includes("/AzToolsFramework/") ? ["AZTF_EXPORTS"] : []);
+    const entry = buildCompileDatabase(reply([runtime, editor]), mappings, [ENGINE_FILE], undefined, lookup).find((c) => c.file === ENGINE_FILE)!;
+    assert.deepStrictEqual(entry.arguments.slice(0, 3), [CL, "/DAZ_PROFILE_BUILD", "/DAZTF_EXPORTS"]);
+    const plain = engineEntry().arguments;
+    assert.deepStrictEqual(
+      entry.arguments.filter((token) => token !== "/DAZTF_EXPORTS"),
+      plain,
+      "only the define is added to the shared command",
+    );
   });
 });
 
@@ -381,7 +400,16 @@ suite("compileDb.isOtherPlatformPath", () => {
     assert.strictEqual(isOtherPlatformPath("D:/Src/Code/Framework/Linux/X.cpp", "win32"), false);
   });
 
+  test("macOS skips Windows, Linux and the Linux-like folders, and keeps its own, Apple's and the Unix-like ones", () => {
+    for (const p of ["Platform/Windows", "Platform/Linux", "Platform/Android", "Platform/iOS", "Platform/Emscripten", "Platform/Common/WinAPI", "Platform/Common/LinuxLike", "Platform/Common/Wayland", "Platform/Common/Xcb"]) {
+      assert.strictEqual(isOtherPlatformPath(`${F}/${p}/X.cpp`, "darwin"), true, p);
+    }
+    for (const p of ["Platform/Mac", "Platform/Common/Apple", "Platform/Common/UnixLike", "Platform/Common/Default", "Component"]) {
+      assert.strictEqual(isOtherPlatformPath(`${F}/${p}/X.cpp`, "darwin"), false, p);
+    }
+  });
+
   test("an unknown host platform excludes nothing", () => {
-    assert.strictEqual(isOtherPlatformPath(`${F}/Platform/Linux/X.cpp`, "darwin"), false);
+    assert.strictEqual(isOtherPlatformPath(`${F}/Platform/Linux/X.cpp`, "freebsd"), false);
   });
 });

@@ -1,0 +1,30 @@
+I[04:28:31.056] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)
+I[04:28:31.056] Features: windows+grpc
+I[04:28:31.056] PID: 39572
+I[04:28:31.056] Working directory: D:\ib\scratch
+I[04:28:31.056] argv[0]: C:\Users\user\AppData\Roaming\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\22.1.6\clangd_22.1.6\bin\clangd.exe
+I[04:28:31.056] argv[1]: --check=D:/OffLocalDev/gs_play_gems/gs_core/Code/Include/GS_Core/GS_CoreBus.h
+I[04:28:31.056] argv[2]: --compile-commands-dir=D:/ib/scratch/db
+I[04:28:31.060] Entering check mode (no LSP server)
+I[04:28:31.060] Testing on source file D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h
+I[04:28:31.061] Loading compilation database...
+I[04:28:31.216] Loaded compilation database from D:/ib/scratch/db\compile_commands.json
+I[04:28:31.217] <long line trimmed>
+I[04:28:31.218] Parsing command...
+I[04:28:31.226] <long line trimmed>
+I[04:28:31.227] Building preamble...
+I[04:28:33.835] Built preamble of size 27880292 for file D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h version null in 2.61 seconds
+I[04:28:33.835] Indexing headers...
+I[04:28:34.347] Building AST...
+I[04:28:34.411] Indexing AST...
+I[04:28:34.411] Building inlay hints
+I[04:28:34.411] Building semantic highlighting
+I[04:28:34.412] Testing features at each token (may be slow in large files)
+E[04:28:34.415]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h:14:9 <Spelling=d:\OffLocalDev\o3de_sourcedev\Code\Fr <trimmed>
+E[04:28:34.416]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h:14:9 <Spelling=d:\OffLocalDev\o3de_sourcedev\Code\Fr <trimmed>
+E[04:28:34.416]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h:14:9 <Spelling=d:\OffLocalDev\o3de_sourcedev\Code\Fr <trimmed>
+E[04:28:34.417]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h:14:9 <Spelling=d:\OffLocalDev\o3de_sourcedev\Code\Fr <trimmed>
+I[04:28:34.423] Found definition heuristically using nearby identifier GS_CoreRequests
+I[04:28:34.425] Found definition heuristically using nearby identifier GS_CoreRequests
+E[04:28:34.433]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\OffLocalDev\gs_play_gems\gs_core\Code\Include\GS_Core\GS_CoreBus.h:14:9 <Spelling=d:\OffLocalDev\o3de_sourcedev\Code\Fr <trimmed>
+I[04:28:34.457] All checks completed, 5 errors

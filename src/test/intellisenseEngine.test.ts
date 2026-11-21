@@ -17,6 +17,7 @@ import {
   runningEngine,
   runningEngineLabel,
   withCompileCommandsDir,
+  withQueryDriver,
 } from "../intellisense/intellisenseEngine";
 
 const DB = "D:\\OffLocalDev\\gs_play\\build\\windows\\clangd";
@@ -62,6 +63,24 @@ suite("intellisenseEngine.withCompileCommandsDir", () => {
   });
 });
 
+suite("intellisenseEngine.withQueryDriver", () => {
+  const GCC = "/usr/bin/g++";
+
+  test("adds the compiler and keeps every other argument in order", () => {
+    assert.deepStrictEqual(withQueryDriver(["--log=verbose", "-j=8"], GCC), ["--log=verbose", "-j=8", `--query-driver=${GCC}`]);
+  });
+
+  test("the user's own globs (attached or detached) are extended, never replaced", () => {
+    assert.deepStrictEqual(withQueryDriver(["--query-driver=/opt/gcc/bin/*", "-j=8"], GCC), ["-j=8", `--query-driver=/opt/gcc/bin/*,${GCC}`]);
+    assert.deepStrictEqual(withQueryDriver(["--query-driver", "/opt/gcc/bin/*"], GCC), [`--query-driver=/opt/gcc/bin/*,${GCC}`]);
+  });
+
+  test("idempotent: the compiler is listed once however often it is applied", () => {
+    const once = withQueryDriver([], GCC);
+    assert.deepStrictEqual(withQueryDriver(once, GCC), once);
+  });
+});
+
 // ---- Write plan --------------------------------------------------------------
 type Workspace = Partial<Record<ManagedKey, unknown>>;
 
@@ -94,6 +113,15 @@ suite("intellisenseEngine.planEngine", () => {
       "C_Cpp.intelliSenseEngine": "disabled",
       "clangd.arguments": [`--compile-commands-dir=${DB}`],
     });
+  });
+
+  test("a GNU-style compiler is also allowed as clangd's query driver; switching back restores the user's arguments", () => {
+    const original: Workspace = { "clangd.arguments": ["--log=verbose"] };
+    const clangd = switchTo("clangd", { workspace: original, prior: {} }, { queryDriver: "/usr/bin/g++" });
+    assert.deepStrictEqual(clangd.workspace["clangd.arguments"], ["--log=verbose", `--compile-commands-dir=${DB}`, "--query-driver=/usr/bin/g++"]);
+    const again = switchTo("clangd", clangd, { queryDriver: "/usr/bin/g++" });
+    assert.deepStrictEqual(again.workspace["clangd.arguments"], clangd.workspace["clangd.arguments"], "switching again adds nothing");
+    assert.deepStrictEqual(switchTo("cpptools", again).workspace["clangd.arguments"], ["--log=verbose"]);
   });
 
   test("back to C/C++ from there: the workspace is clean again, with clangd switched off", () => {

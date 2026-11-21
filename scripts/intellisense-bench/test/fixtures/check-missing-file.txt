@@ -1,0 +1,8 @@
+I[04:28:34.504] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)
+I[04:28:34.504] Features: windows+grpc
+I[04:28:34.504] PID: 41300
+I[04:28:34.504] Working directory: D:\ib\scratch
+I[04:28:34.504] argv[0]: C:\Users\user\AppData\Roaming\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\22.1.6\clangd_22.1.6\bin\clangd.exe
+I[04:28:34.504] argv[1]: --check=D:/ib/scratch/err/nonexistent.cpp
+I[04:28:34.504] argv[2]: --compile-commands-dir=D:/ib/scratch/err
+E[04:28:34.508] Failed to resolve path D:/ib/scratch/err/nonexistent.cpp: no such file or directory

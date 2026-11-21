@@ -9,7 +9,9 @@
 //    configure wrote a new reply     watcher: reply/index-*.json
 //    build config switched           options.onDidChange (config only)
 //    workspace folders changed       a source engine added/removed changes engine entries
-//    extensions changed              clangd installed / C/C++ extension removed (clangd-only)
+//    engineCoverage setting changed  how much engine source the database holds
+//    compileDatabase setting changed the user's own database (userDatabase.ts) chosen or dropped
+//    extensions changed             clangd installed / C/C++ extension removed (clangd-only)
 //    startup                         catches up on a configure run while VS Code was closed
 //
 //  Events are coalesced (a configure writes hundreds of reply files). A generation
@@ -19,6 +21,11 @@
 //  Never touches a clangd that isn't using O3DE's database (clangdDatabase.ts).
 //  Never restarts a clangd with no server: its download prompt would come back
 //  after every configure.
+//
+//  A user-provided database (o3de.intellisense.compileDatabase) is never generated, synced or
+//  written. The sync only follows the setting: it re-points a clangd that O3DE itself pointed,
+//  and only when clangd is the sole engine (with both engines running, the engine picker owns
+//  the switch, so the C/C++ extension is never turned off behind the user's back).
 // ============================================================================
 
 import * as vscode from "vscode";
@@ -34,28 +41,48 @@ import {
   clangdUsesDatabase,
   compileCommandsDirOf,
   databaseDetail,
+  databaseFileNote,
   databaseState,
+  needsRepoint,
   sameDirectory,
 } from "./clangdDatabase";
-import { EngineSwitchResult, generateWorkspaceDatabase, lastDatabaseGeneration, readEngineInputs, runClangdCommand, switchEngine } from "./clangdMode";
+import {
+  EngineSwitchResult,
+  appliedDatabaseDir,
+  generateWorkspaceDatabase,
+  lastDatabaseGeneration,
+  readDatabaseSelection,
+  readEngineInputs,
+  runClangdCommand,
+  switchEngine,
+} from "./clangdMode";
 import { compileDatabaseDir } from "./compileDb";
+import type { EngineCoverage } from "./databasePlan";
 import { replyTimestamp } from "./fileApi";
 import { ClangdOnlyDecision, RunningEngine, clangdOnlyDecision, runningEngine } from "./intellisenseEngine";
 import type { IntelliSenseStatus } from "./intellisenseStatus";
+import type { DatabaseSelection } from "./userDatabase";
 
 // ---- Status ----------------------------------------------------------------
-/** Is clangd using O3DE's database for `project`, and is that database current? */
+/** The database folder clangd should read for `project`: the user's own when they named one, else O3DE's generated one. */
+function databaseDirOf(project: O3deProject | undefined, selection: DatabaseSelection | undefined): string | undefined {
+  return selection?.dir ?? (project ? compileDatabaseDir(projectBuildDir(project.path)) : undefined);
+}
+
+/** Is clangd using the selected database for `project` (generated or the user's own), and is a generated one current? */
 export function readDatabaseStatus(project: O3deProject | undefined, configName: string, running: RunningEngine): DatabaseStatus {
-  const dir = project ? compileDatabaseDir(projectBuildDir(project.path)) : undefined;
+  const selection = readDatabaseSelection(project);
+  const dir = databaseDirOf(project, selection);
   const clangdDir = compileCommandsDirOf(vscode.workspace.getConfiguration("clangd").get("arguments"));
   const last = lastDatabaseGeneration();
   const state = databaseState({
     inUse: clangdUsesDatabase(running, clangdDir, dir),
+    userProvided: selection?.source === "user",
     last,
     config: configName,
     replyTimestamp: project ? replyTimestamp(fileApiReplyDir(project.path)) : undefined,
   });
-  return { state, dir, last };
+  return { state, dir, last, selection };
 }
 
 function primaryProject(): O3deProject | undefined {
@@ -99,30 +126,75 @@ export async function applyClangdOnlyMode(options: BuildOptions, workspaceState:
     return { decision, result };
   }
   await workspaceState.update(CLANGD_ONLY_KEY, true);
-  log().info(`clangd-only: the C/C++ extension isn't installed — clangd switched on with O3DE's compile database (${result.database?.entries ?? 0} entries).`);
+  const own = result.compileDatabase?.source === "user" ? result.compileDatabase.file : undefined; // the user's own database, not O3DE's
+  log().info(
+    `clangd-only: the C/C++ extension isn't installed — clangd switched on with ` +
+      (own ? `your compile database (${own}).` : `O3DE's compile database (${result.database?.entries ?? 0} entries).`),
+  );
   void vscode.window.showInformationMessage(
-    "O3DE: clangd now provides C++ IntelliSense in this workspace, from O3DE's compile database. The C/C++ extension " +
-      "isn't installed, so O3DE switched clangd on automatically and keeps its database up to date.",
+    own
+      ? `O3DE: clangd now provides C++ IntelliSense in this workspace, from your compile database (${own}). The C/C++ extension ` +
+          "isn't installed, so O3DE switched clangd on automatically. It never writes your database."
+      : "O3DE: clangd now provides C++ IntelliSense in this workspace, from O3DE's compile database. The C/C++ extension " +
+          "isn't installed, so O3DE switched clangd on automatically and keeps its database up to date.",
   );
   return { decision, result };
 }
 
+// ---- Follow the setting ----------------------------------------------------
+/**
+ * The compile database setting changed (or a configure, config switch, folder or extension change re-evaluated it):
+ * point clangd at the database the selection now names — but only a clangd that O3DE itself pointed, and only when
+ * clangd is the sole running engine (needsRepoint). With both engines running nothing happens here: the follow never
+ * touches the C/C++ extension, and the status shows the mismatch until the user picks an engine. Runs the engine
+ * switch, which generates nothing for a user database. Returns the switch's result when it re-pointed clangd.
+ * Nothing watches the named file itself: it appearing or vanishing is noticed at the next of those events.
+ */
+export async function followDatabaseSetting(options: BuildOptions, workspaceState: vscode.Memento): Promise<EngineSwitchResult | undefined> {
+  const project = primaryProject();
+  const selection = readDatabaseSelection(project);
+  const repoint = needsRepoint({
+    running: runningEngine(readEngineInputs()),
+    clangdDir: compileCommandsDirOf(vscode.workspace.getConfiguration("clangd").get("arguments")),
+    targetDir: databaseDirOf(project, selection),
+    ownDirs: [project ? compileDatabaseDir(projectBuildDir(project.path)) : undefined, appliedDatabaseDir(workspaceState)],
+  });
+  if (!repoint) {
+    return undefined;
+  }
+  const result = await switchEngine("clangd", options, workspaceState);
+  log().info(
+    result.ok
+      ? `clangd re-pointed at ${selection?.source === "user" ? `your compile database (${selection.file})` : "O3DE's generated compile database"}.`
+      : `clangd not re-pointed at the selected compile database yet — ${result.message}`,
+  );
+  return result;
+}
+
 // ---- Sync ------------------------------------------------------------------
 export type SyncOutcome =
-  | { ran: false; reason: "clangdNotInstalled" | "notInUse" }
+  | { ran: false; reason: "clangdNotInstalled" | "notInUse" | "userDatabase" }
   | { ran: true; generation: DatabaseGeneration; restarted: boolean };
 
-/** Regenerate the database if clangd uses it; restart clangd only when the content changed. */
-export async function syncClangdDatabase(options: BuildOptions, trigger: string): Promise<SyncOutcome> {
+/**
+ * Regenerate the database if clangd uses it; restart clangd only when the content changed. `coverage`
+ * overrides the engineCoverage setting for this one generation (the next automatic update goes back to the setting).
+ * A user-provided database is never regenerated or written: reason "userDatabase".
+ */
+export async function syncClangdDatabase(options: BuildOptions, trigger: string, coverage?: EngineCoverage): Promise<SyncOutcome> {
   const inputs = readEngineInputs();
   if (!inputs.clangdInstalled) {
     return { ran: false, reason: "clangdNotInstalled" };
   }
-  if (readDatabaseStatus(primaryProject(), options.config, runningEngine(inputs)).state === "notInUse") {
+  const { state } = readDatabaseStatus(primaryProject(), options.config, runningEngine(inputs));
+  if (state === "notInUse") {
     return { ran: false, reason: "notInUse" };
   }
+  if (state === "userProvided") {
+    return { ran: false, reason: "userDatabase" };
+  }
 
-  const generation = generateWorkspaceDatabase(options, trigger);
+  const generation = generateWorkspaceDatabase(options, trigger, coverage);
   let restarted = false;
   if (generation.ok && generation.changed) {
     if (findClangdServer()) {
@@ -163,6 +235,11 @@ export class ClangdDatabaseSync implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.schedule("folders")),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration("o3de.intellisense.engineCoverage") || event.affectsConfiguration("o3de.intellisense.compileDatabase")) {
+          this.schedule("setting"); // how much engine source the database holds, or which database clangd reads, changed
+        }
+      }),
       vscode.extensions.onDidChange(() => this.schedule("extensions")),
     );
     this.schedule("startup");
@@ -187,6 +264,10 @@ export class ClangdDatabaseSync implements vscode.Disposable {
     }
     this.syncing = true;
     try {
+      const followed = await followDatabaseSetting(this.options, this.workspaceState);
+      if (followed?.ok) {
+        return; // the re-point ran the engine switch, which settled the database — no second pass
+      }
       const clangdOnly = await applyClangdOnlyMode(this.options, this.workspaceState);
       if (!clangdOnly.result?.ok) {
         await syncClangdDatabase(this.options, this.trigger); // a clangd-only switch just generated it — no second pass
@@ -215,8 +296,7 @@ export async function showClangdDatabaseStatus(options: BuildOptions, status: In
   const update = "Update Now";
   const configure = "Configure Project";
   const buttons = database.state === "notConfigured" ? [configure] : database.state === "upToDate" || database.state === "updatePending" ? [update] : [];
-  const file = database.last?.ok ? ` File: ${database.last.file}` : "";
-  const pick = await vscode.window.showInformationMessage(databaseDetail(database) + file, ...buttons);
+  const pick = await vscode.window.showInformationMessage(databaseDetail(database) + databaseFileNote(database), ...buttons);
 
   if (pick === configure) {
     await vscode.commands.executeCommand("o3de.configureProject");
@@ -230,9 +310,14 @@ export async function showClangdDatabaseStatus(options: BuildOptions, status: In
 /** One sentence describing a sync outcome (the command's message and the MCP tool's summary line). */
 export function syncMessage(outcome: SyncOutcome): string {
   if (!outcome.ran) {
-    return outcome.reason === "clangdNotInstalled"
-      ? "clangd isn't installed, so there is no compile database to update."
-      : "clangd isn't using O3DE's compile database in this workspace — nothing to update.";
+    switch (outcome.reason) {
+      case "clangdNotInstalled":
+        return "clangd isn't installed, so there is no compile database to update.";
+      case "userDatabase":
+        return "clangd reads your own compile database (o3de.intellisense.compileDatabase) — O3DE never writes it, so there is nothing to update.";
+      case "notInUse":
+        return "clangd isn't using O3DE's compile database in this workspace — nothing to update.";
+    }
   }
   const generation = outcome.generation;
   if (!generation.ok) {

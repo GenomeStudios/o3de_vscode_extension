@@ -1,0 +1,116 @@
+// ============================================================================
+//  Real `clangd --check` output (clangd 22.1.6, Windows), captured with
+//    clangd --check=<file> --compile-commands-dir=<dir> --background-index=false --log=info
+//  and sanitized: machine and project names swapped for generic ones, and the very long
+//  command lines shortened. Every line keeps the prefix, level and wording clangd printed.
+//
+//  Used by healthCheck.test.ts to prove the parser reads real compile errors and nothing else.
+// ============================================================================
+
+// A file WITH its own entry in the database. 0 real compile errors. clangd still says "1 errors":
+// that is a refactoring tweak failing (multi-line message), not a compile error.
+export const CHECK_FROM_ENTRY: string = [
+  "I[05:34:53.838] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)",
+  "I[05:34:53.838] Features: windows+grpc",
+  "I[05:34:53.838] PID: 28044",
+  "I[05:34:53.838] Working directory: C:\\Users\\dev\\code",
+  "I[05:34:53.838] argv[0]: C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\globalStorage\\llvm-vs-code-extensions.vscode-clangd\\install\\22.1.6\\clangd_22.1.6\\bin\\clangd.exe",
+  "I[05:34:53.838] argv[1]: --check=D:\\work\\gems\\core_gem\\Code\\Source\\CoreDataSystemComponent.cpp",
+  "I[05:34:53.838] argv[2]: --compile-commands-dir=D:\\work\\mygame\\build\\windows\\clangd",
+  "I[05:34:53.839] argv[3]: --background-index=false",
+  "I[05:34:53.839] argv[4]: --log=info",
+  "I[05:34:53.845] Entering check mode (no LSP server)",
+  "I[05:34:53.845] Testing on source file D:\\work\\gems\\core_gem\\Code\\Source\\CoreDataSystemComponent.cpp",
+  "I[05:34:53.845] Loading compilation database...",
+  "I[05:34:54.002] Loaded compilation database from D:\\work\\mygame\\build\\windows\\clangd\\compile_commands.json",
+  "I[05:34:54.004] Compile command from CDB is: [D:/work/mygame/build/windows] \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\VC\\\\Tools\\\\MSVC\\\\14.51.36231\\\\bin\\\\Hostx64\\\\x64\\\\cl.exe\" --driver-mode=cl \"/DAZ_BUILD_CONFIGUR...",
+  "I[05:34:54.004] Parsing command...",
+  "I[05:34:54.013] internal (cc1) args are: -cc1 -triple x86_64-pc-windows-msvc19.51.36260 -O3 -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CoreDataSystemComponent....",
+  "I[05:34:54.014] Building preamble...",
+  "I[05:34:59.194] Built preamble of size 56560404 for file D:\\work\\gems\\core_gem\\Code\\Source\\CoreDataSystemComponent.cpp version null in 5.18 seconds",
+  "I[05:34:59.194] Indexing headers...",
+  "I[05:35:00.139] Building AST...",
+  "I[05:35:00.325] Indexing AST...",
+  "I[05:35:00.330] Building inlay hints",
+  "I[05:35:00.331] Building semantic highlighting",
+  "I[05:35:00.332] Testing features at each token (may be slow in large files)",
+  "E[05:35:00.513]     tweak: SwapBinaryOperands ==> FAIL: The new replacement overlaps with an existing replacement.",
+  "New replacement: D:\\work\\gems\\core_gem\\Code\\Source\\CoreDataSystemComponent.cpp: 1386:+127:\"==\"",
+  "Existing replacement: D:\\work\\gems\\core_gem\\Code\\Source\\CoreDataSystemComponent.cpp: 1386:+127:\"AZ_COMPONENT_IMPL(CoreDataSystemComponent, \"CoreDataSystemComponent\", \"{9C73C4D3-AF83-4EB9-B28D-13C6DF90FC9B}\")\"",
+  "I[05:35:01.140] All checks completed, 1 errors",
+].join("\n");
+
+// A file with NO entry: clangd borrowed another file's flags ("inferred from"). 9 real compile errors.
+export const CHECK_INFERRED_WITH_ERRORS: string = [
+  "I[05:35:01.208] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)",
+  "I[05:35:01.208] Features: windows+grpc",
+  "I[05:35:01.208] PID: 42416",
+  "I[05:35:01.208] Working directory: C:\\Users\\dev\\code",
+  "I[05:35:01.208] argv[0]: C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\globalStorage\\llvm-vs-code-extensions.vscode-clangd\\install\\22.1.6\\clangd_22.1.6\\bin\\clangd.exe",
+  "I[05:35:01.208] argv[1]: --check=D:\\work\\gems\\canvas_gem\\Code\\Source\\Core\\GraphContext.cpp",
+  "I[05:35:01.208] argv[2]: --compile-commands-dir=D:\\work\\mygame\\build\\windows\\clangd",
+  "I[05:35:01.209] argv[3]: --background-index=false",
+  "I[05:35:01.209] argv[4]: --log=info",
+  "I[05:35:01.214] Entering check mode (no LSP server)",
+  "I[05:35:01.214] Testing on source file D:\\work\\gems\\canvas_gem\\Code\\Source\\Core\\GraphContext.cpp",
+  "I[05:35:01.214] Loading compilation database...",
+  "I[05:35:01.383] Loaded compilation database from D:\\work\\mygame\\build\\windows\\clangd\\compile_commands.json",
+  "I[05:35:01.386] Compile command inferred from D:/work/gems/canvas_gem/Code/Source/Clients/CanvasModule.cpp is: [D:/work/mygame/build/windows] \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\VC\\\\Tools\\\\MSVC\\\\14.51.36231...",
+  "I[05:35:01.386] Parsing command...",
+  "I[05:35:01.394] internal (cc1) args are: -cc1 -triple x86_64-pc-windows-msvc19.51.36260 -O3 -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name GraphContext.cpp -mreloc...",
+  "I[05:35:01.395] Building preamble...",
+  "I[05:35:04.057] Built preamble of size 26885188 for file D:\\work\\gems\\canvas_gem\\Code\\Source\\Core\\GraphContext.cpp version null in 2.66 seconds",
+  "I[05:35:04.057] Indexing headers...",
+  "E[05:35:04.563] [pp_file_not_found] Line 4: in included file: 'GraphModel/Model/GraphContext.h' file not found",
+  "I[05:35:04.563] Building AST...",
+  "E[05:35:04.640] [undeclared_var_use] Line 19: use of undeclared identifier 'GraphModel'",
+  "E[05:35:04.640] [undeclared_var_use] Line 20: use of undeclared identifier 'GraphModel'",
+  "E[05:35:04.640] [mem_init_not_member_or_class] Line 20: member initializer 'GraphContext' does not name a non-static data member or base class",
+  "E[05:35:04.640] [undeclared_var_use] Line 32: use of undeclared identifier 'GraphModel'",
+  "E[05:35:04.640] [mem_init_not_member_or_class] Line 32: member initializer 'GraphContext' does not name a non-static data member or base class",
+  "E[05:35:04.640] [undeclared_var_use] Line 35: use of undeclared identifier 'm_dataTypes'",
+  "E[05:35:04.640] [undeclared_var_use] Line 36: use of undeclared identifier 'GraphModel'",
+  "E[05:35:04.640] [no_member] Line 37: no member named 'any' in namespace 'AZStd'",
+  "I[05:35:04.640] Indexing AST...",
+  "I[05:35:04.641] Building inlay hints",
+  "I[05:35:04.641] Building semantic highlighting",
+  "I[05:35:04.641] Testing features at each token (may be slow in large files)",
+  "I[05:35:04.673] All checks completed, 9 errors",
+].join("\n");
+
+// A header with no entry whose only E[ lines are refactoring tweaks failing: 0 real compile errors, although
+// clangd's own summary says "5 errors".
+export const CHECK_NOISE_ONLY: string = [
+  "I[05:35:04.726] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)",
+  "I[05:35:04.727] Features: windows+grpc",
+  "I[05:35:04.727] PID: 6928",
+  "I[05:35:04.727] Working directory: C:\\Users\\dev\\code",
+  "I[05:35:04.727] argv[0]: C:\\Users\\dev\\AppData\\Roaming\\Code\\User\\globalStorage\\llvm-vs-code-extensions.vscode-clangd\\install\\22.1.6\\clangd_22.1.6\\bin\\clangd.exe",
+  "I[05:35:04.727] argv[1]: --check=D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h",
+  "I[05:35:04.727] argv[2]: --compile-commands-dir=D:\\work\\mygame\\build\\windows\\clangd",
+  "I[05:35:04.727] argv[3]: --background-index=false",
+  "I[05:35:04.727] argv[4]: --log=info",
+  "I[05:35:04.731] Entering check mode (no LSP server)",
+  "I[05:35:04.731] Testing on source file D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h",
+  "I[05:35:04.731] Loading compilation database...",
+  "I[05:35:04.893] Loaded compilation database from D:\\work\\mygame\\build\\windows\\clangd\\compile_commands.json",
+  "I[05:35:04.895] Compile command inferred from D:/work/gems/core_gem/Code/Source/Clients/CoreModule.cpp is: [D:/work/mygame/build/windows] \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\VC\\\\Tools\\\\MSVC\\\\14.51.36231\\\\bi...",
+  "I[05:35:04.896] Parsing command...",
+  "I[05:35:04.904] internal (cc1) args are: -cc1 -triple x86_64-pc-windows-msvc19.51.36260 -O3 -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CoreBus.h -mrelocation-m...",
+  "I[05:35:04.905] Building preamble...",
+  "I[05:35:08.152] Built preamble of size 27880292 for file D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h version null in 3.25 seconds",
+  "I[05:35:08.152] Indexing headers...",
+  "I[05:35:08.793] Building AST...",
+  "I[05:35:08.863] Indexing AST...",
+  "I[05:35:08.864] Building inlay hints",
+  "I[05:35:08.864] Building semantic highlighting",
+  "I[05:35:08.865] Testing features at each token (may be slow in large files)",
+  "E[05:35:08.869]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h:14:9 <Spelling=d:\\work\\engine\\Code\\Framework\\AzCore\\AzCore\\RTTI\\TypeInfoSimple.h:542:5>",
+  "E[05:35:08.869]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h:14:9 <Spelling=d:\\work\\engine\\Code\\Framework\\AzCore\\AzCore\\RTTI\\TypeInfoSimple.h:542:5>",
+  "E[05:35:08.869]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h:14:9 <Spelling=d:\\work\\engine\\Code\\Framework\\AzCore\\AzCore\\RTTI\\TypeInfoSimple.h:542:5>",
+  "E[05:35:08.870]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h:14:9 <Spelling=d:\\work\\engine\\Code\\Framework\\AzCore\\AzCore\\RTTI\\TypeInfoSimple.h:542:5>",
+  "I[05:35:08.877] Found definition heuristically using nearby identifier CoreRequests",
+  "I[05:35:08.878] Found definition heuristically using nearby identifier CoreRequests",
+  "E[05:35:08.886]     tweak: SpecialMembers ==> FAIL: Class body in wrong file: D:\\work\\gems\\core_gem\\Code\\Include\\CoreGem\\CoreBus.h:14:9 <Spelling=d:\\work\\engine\\Code\\Framework\\AzCore\\AzCore\\RTTI\\TypeInfoSimple.h:542:5>",
+  "I[05:35:08.914] All checks completed, 5 errors",
+].join("\n");

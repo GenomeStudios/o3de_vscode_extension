@@ -1,0 +1,30 @@
+I[04:28:30.941] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)
+I[04:28:30.942] Features: windows+grpc
+I[04:28:30.942] PID: 33828
+I[04:28:30.942] Working directory: D:\ib\scratch
+I[04:28:30.942] argv[0]: C:\Users\user\AppData\Roaming\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\22.1.6\clangd_22.1.6\bin\clangd.exe
+I[04:28:30.942] argv[1]: --check=D:/ib/scratch/err/bad.cpp
+I[04:28:30.942] argv[2]: --compile-commands-dir=D:/ib/scratch/err
+I[04:28:30.945] Entering check mode (no LSP server)
+I[04:28:30.945] Testing on source file D:\ib\scratch\err\bad.cpp
+I[04:28:30.946] Loading compilation database...
+I[04:28:30.991] Loaded compilation database from D:/ib/scratch/err\compile_commands.json
+I[04:28:30.991] <long line trimmed>
+I[04:28:30.991] Parsing command...
+I[04:28:30.999] <long line trimmed>
+I[04:28:31.000] Building preamble...
+I[04:28:31.006] Built preamble of size 269144 for file D:\ib\scratch\err\bad.cpp version null in 0.01 seconds
+I[04:28:31.006] Indexing headers...
+E[04:28:31.006] [pp_file_not_found] Line 1: 'nothere.h' file not found
+I[04:28:31.006] Building AST...
+E[04:28:31.025] IncludeCleaner: Failed to get an entry for resolved path '' from include "nothere.h" : no such file or directory
+E[04:28:31.027] [undeclared_var_use] Line 2: use of undeclared identifier 'undefinedThing'
+E[04:28:31.027] [undeclared_var_use] Line 2: use of undeclared identifier 'missingFn'
+I[04:28:31.027] Indexing AST...
+I[04:28:31.027] Building inlay hints
+I[04:28:31.027] Building semantic highlighting
+I[04:28:31.027] Testing features at each token (may be slow in large files)
+E[04:28:31.027] IncludeCleaner: Failed to get an entry for resolved path '' from include "nothere.h" : no such file or directory
+E[04:28:31.028] IncludeCleaner: Failed to get an entry for resolved path '' from include "nothere.h" : no such file or directory
+E[04:28:31.029] IncludeCleaner: Failed to get an entry for resolved path '' from include "nothere.h" : no such file or directory
+I[04:28:31.029] All checks completed, 3 errors

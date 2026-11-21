@@ -1,0 +1,14 @@
+I[07:44:14.112] clangd version 22.1.6 (https://github.com/llvm/llvm-project fc4aad7b5db3fff421df9a9637605b9ca5667881)
+I[07:44:14.113] Features: windows+grpc
+I[07:44:14.113] PID: 30700
+I[07:44:14.113] Working directory: D:\ib\scratch
+I[07:44:14.113] argv[0]: C:\Users\user\AppData\Roaming\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\22.1.6\clangd_22.1.6\bin\clangd.exe
+I[07:44:14.113] argv[1]: --check=D:/OffLocalDev/gs_play_gems/gs_core/Code/Source/Clients/GS_CoreModule.cpp
+I[07:44:14.113] argv[2]: --compile-commands-dir=D:/ib/scratch/db
+I[07:44:14.118] Entering check mode (no LSP server)
+I[07:44:14.118] Testing on source file D:\OffLocalDev\gs_play_gems\gs_core\Code\Source\Clients\GS_CoreModule.cpp
+I[07:44:14.119] Loading compilation database...
+I[07:44:14.316] Loaded compilation database from D:/ib/scratch/db\compile_commands.json
+I[07:44:14.319] Compile command from CDB is: [D:/OffLocalDev/gs_play/build/windows] "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\cl.exe" --driver-mode=cl "/DAZ_BUILD_CONFIGURATION_TYPE=\
+I[07:44:14.319] Parsing command...
+I[07:44:14.331] internal (cc1) args are: -cc1 -triple x86_64-pc-windows-msvc19.51.36260 -O3 -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name GS_CoreModule.cpp -mrelocation-model pic -pi
