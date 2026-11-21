@@ -72,25 +72,61 @@ export function readCachedValue(cacheText: string, name: string): string | undef
   return undefined;
 }
 
+// ---- 3rd-party path --------------------------------------------------------
+/** The cache variable that points CMake at the O3DE 3rd-party packages. */
+export const THIRD_PARTY_FLAG = "LY_3RDPARTY_PATH";
+
+export type ThirdPartySource = "advanced-flag" | "manifest" | "default";
+
+/** The Advanced tab's LY_3RDPARTY_PATH exactly as stored, or undefined when absent or blank (a blank never blanks the path). */
+function customThirdPartyPath(extra: Record<string, string> | undefined): string | undefined {
+  const value = extra?.[THIRD_PARTY_FLAG];
+  return value !== undefined && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * The 3rd-party path Configure uses, and where it came from. Precedence: the Advanced tab's
+ * LY_3RDPARTY_PATH, then the O3DE manifest's default_third_party_folder, then <home>/.o3de/3rdParty.
+ */
+export function resolveThirdPartyPath(
+  manifestFolder: string | undefined,
+  extra: Record<string, string> | undefined,
+  home: string,
+): { path: string; source: ThirdPartySource } {
+  const custom = customThirdPartyPath(extra);
+  if (custom !== undefined) {
+    return { path: custom, source: "advanced-flag" };
+  }
+  if (manifestFolder !== undefined) {
+    return { path: manifestFolder, source: "manifest" };
+  }
+  return { path: path.join(home, ".o3de", "3rdParty"), source: "default" };
+}
+
 // ---- Configure command line ------------------------------------------------
 export interface ConfigureInputs {
   projectPath: string;
   buildDir: string;
   generator: string; // "Ninja Multi-Config" | "Visual Studio 17 2022"
-  thirdPartyPath: string; // LY_3RDPARTY_PATH
+  thirdPartyPath: string; // LY_3RDPARTY_PATH default (a non-empty Advanced-tab value replaces it)
   compiler?: "MSVC" | "Clang" | "GCC"; // default MSVC (Windows) / Clang (Linux)
   extraCacheArgs?: Record<string, string>; // Advanced-tab -D<VAR>=<value> cache flags
 }
 
 /**
  * The argv for the O3DE configure: cmake -G <gen> -S <project> -B <build>
- * -DLY_3RDPARTY_PATH=<3rd>, plus the compiler selection.
+ * -DLY_3RDPARTY_PATH=<3rd>, plus the compiler selection. LY_3RDPARTY_PATH is emitted
+ * exactly once: the Advanced tab's value when it has one, else `thirdPartyPath`.
  *   - Clang, VS generator  → -T ClangCl  (the clang-cl toolset that ships with VS)
  *   - Clang, Ninja         → -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++
  *   - GCC   (Linux/Ninja)  → -DCMAKE_C_COMPILER=gcc    -DCMAKE_CXX_COMPILER=g++
  *   - MSVC                 → no override (the default toolset for the VS/Ninja env)
  */
 export function buildConfigureArgs(inputs: ConfigureInputs): string[] {
+  const extras = { ...inputs.extraCacheArgs };
+  const thirdPartyPath = customThirdPartyPath(extras) ?? inputs.thirdPartyPath;
+  delete extras[THIRD_PARTY_FLAG]; // taken above (or blank): never emitted a second time
+
   const args = [
     "cmake",
     "-G",
@@ -99,7 +135,7 @@ export function buildConfigureArgs(inputs: ConfigureInputs): string[] {
     inputs.projectPath,
     "-B",
     inputs.buildDir,
-    `-DLY_3RDPARTY_PATH=${inputs.thirdPartyPath}`,
+    `-D${THIRD_PARTY_FLAG}=${thirdPartyPath}`,
   ];
 
   if (inputs.compiler === "Clang") {
@@ -114,8 +150,8 @@ export function buildConfigureArgs(inputs: ConfigureInputs): string[] {
 
   // Advanced-tab extra cache variables (e.g. LY_RENDERDOC_ENABLED, CMAKE_OBJECT_PATH_MAX).
   // Sorted for a stable, diff-friendly command line.
-  for (const key of Object.keys(inputs.extraCacheArgs ?? {}).sort()) {
-    args.push(`-D${key}=${inputs.extraCacheArgs![key]}`);
+  for (const key of Object.keys(extras).sort()) {
+    args.push(`-D${key}=${extras[key]}`);
   }
   return args;
 }

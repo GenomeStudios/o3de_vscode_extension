@@ -5,6 +5,9 @@
 .claude/**
 .serena/**
 .mcp.json
+CLAUDE.md
+PUBLISHING.md
+publish.bat
 *.vsix
 src/**
 out/**

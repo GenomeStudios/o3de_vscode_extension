@@ -31,6 +31,7 @@ import { launchArgsLabel } from "../build/runCommand";
 import { DependencyStatus } from "../deps/dependencyStatus";
 import { buildOnboardingModel, resolveGuidedAction, View } from "../deps/registry";
 import { runGuidedAction } from "../deps/actions";
+import { describeVsSelection } from "../env/visualStudioPreference";
 import { engineModeDetail, engineModeLabel } from "../intellisense/engineMode";
 import { cppFreshnessDetail, cppFreshnessLabel, luaFreshnessDetail, luaFreshnessLabel } from "../intellisense/freshness";
 import { IntelliSenseSnapshot, IntelliSenseStatus } from "../intellisense/intellisenseStatus";
@@ -59,6 +60,7 @@ const COMMANDS: Record<string, string> = {
   selectGenerator: "o3de.selectGenerator",
   selectConfig: "o3de.selectConfig",
   selectCompiler: "o3de.selectCompiler",
+  selectVisualStudio: "o3de.selectVisualStudio",
   selectTargets: "o3de.selectTargets",
   setCoreCount: "o3de.setCoreCount",
   configureProject: "o3de.configureProject",
@@ -116,6 +118,17 @@ function configPayload(
         rows: [
           { label: "Generator", value: options.generator, cmd: "selectGenerator" },
           { label: "Compiler", value: options.compiler, cmd: "selectCompiler" },
+          // Windows only. describeVsSelection() is a synchronous read of the setting + the last detection (vswhere never runs in a render).
+          ...(process.platform === "win32"
+            ? [
+                {
+                  label: "Visual Studio",
+                  value: describeVsSelection(),
+                  tip: "Which Visual Studio's MSVC environment Configure, Build and the Developer terminal use. Click to choose.",
+                  cmd: "selectVisualStudio",
+                },
+              ]
+            : []),
           { label: "Config", value: options.config, cmd: "selectConfig" },
           { label: "Core Count", value: coreCountLabel(options.coreCount), cmd: "setCoreCount" },
           { label: "Targets", value: targetsLabel(options.targets), cmd: "selectTargets" },
@@ -229,6 +242,22 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     return this.memento.get<Record<string, boolean>>(DashboardViewProvider.COLLAPSE_KEY) ?? {};
   }
 
+  // Everything the page shows, in one object. html() bakes it in as INITIAL, and
+  // postState() re-sends it whenever the page (re)loads or the view is revealed.
+  // VS Code rebuilds a hidden view's page from the html set at resolve time (so
+  // INITIAL goes stale) and drops messages posted while hidden; the page asks for
+  // a fresh copy when it loads. One builder keeps first paint and resync identical.
+  private pageState() {
+    return {
+      running: this.runState.isRunning,
+      activity: this.buildState.activity,
+      status: statusPayload(this.deps),
+      config: configPayload(this.options, this.onboarding, this.buildState.activity, this.intellisense.current),
+      deps: buildOnboardingModel(this.deps.resultMap, this.deps.view),
+      collapse: this.getCollapse(),
+    };
+  }
+
   // Run a clicked onboarding action. When the check is already satisfied and
   // declares a re-run, resolveGuidedAction returns its re-run action + (optional)
   // confirmation, which we surface as a modal before firing.
@@ -252,8 +281,21 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     webview.options = { enableScripts: true };
     webview.html = this.html(webview);
 
+    const postState = (): void => void webview.postMessage({ type: "state", state: this.pageState() });
+
     webview.onDidReceiveMessage(
-      (msg: { command?: string; view?: View; action?: string; rescan?: boolean; collapse?: { key: string; open: boolean } }) => {
+      (msg: {
+        ready?: boolean;
+        command?: string;
+        view?: View;
+        action?: string;
+        rescan?: boolean;
+        collapse?: { key: string; open: boolean };
+      }) => {
+      if (msg.ready) {
+        postState(); // the page just (re)loaded from stale html — bring it up to date
+        return;
+      }
       if (msg.command) {
         const command = COMMANDS[msg.command];
         if (command) {
@@ -307,10 +349,12 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       }),
       // IntelliSense ▸ Status recomputes on its own triggers (re-scan, folders, job end, reply/dump writes).
       this.intellisense.onDidChange(() => postConfig()),
-      // Re-detect whenever the panel is revealed — catches changes made outside
-      // the extension (enabling a gem, generating a dump via the live Editor).
+      // Re-sync and re-detect whenever the panel is revealed — catches changes made
+      // outside the extension (enabling a gem, generating a dump via the live Editor)
+      // and anything posted while the view was hidden.
       webviewView.onDidChangeVisibility(() => {
         if (webviewView.visible) {
+          postState();
           void this.deps.refresh();
         }
       }),
@@ -332,14 +376,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const csp =
       `default-src 'none'; style-src 'unsafe-inline'; ` +
       `script-src 'nonce-${nonce}'; img-src ${webview.cspSource};`;
-    const initial = JSON.stringify({
-      running: this.runState.isRunning,
-      activity: this.buildState.activity,
-      status: statusPayload(this.deps),
-      config: configPayload(this.options, this.onboarding, this.buildState.activity, this.intellisense.current),
-      deps: buildOnboardingModel(this.deps.resultMap, this.deps.view),
-      collapse: this.getCollapse(),
-    });
+    const initial = JSON.stringify(this.pageState());
     const icon = (name: string): string => loadIcon(this.extensionUri, name);
 
     return `<!DOCTYPE html>
@@ -634,9 +671,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     // State is persisted in the extension's workspaceState (survives full VS Code
     // restarts, unlike webview getState which can drop when the view is disposed).
     // Defaults: C++ + IntelliSense open (IntelliSense is where you go when code insight is
-    // wrong), Lua + Onboarding closed.
+    // wrong), Lua + Onboarding closed. Filled from the extension's copy by applyState.
     const DEFAULT_COLLAPSE = { cpp: true, lua: false, intellisense: true, setup: false };
-    const collapse = Object.assign({}, DEFAULT_COLLAPSE, INITIAL.collapse || {});
+    const collapse = {};
     function persistCollapse(key, open) {
       collapse[key] = open;
       vscode.postMessage({ collapse: { key, open } });
@@ -910,6 +947,20 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    // ---- Whole-page state ----
+    // Paints everything the extension's pageState() carries. Used for first paint
+    // (INITIAL) and for every resync ({type:'state'}), so the two cannot drift.
+    // initCollapse is safe to re-run: it only re-applies classes and onclick.
+    function applyState(s) {
+      Object.assign(collapse, DEFAULT_COLLAPSE, s.collapse || {});
+      initCollapse();
+      setConfig(s.config);
+      setDeps(s.deps);
+      setRunning(s.running);
+      setJobs(s.activity);
+      setStatus(s.status);
+    }
+
     // ---- Wire static buttons ----
     buildBtn.onclick = () => { if (!buildBtn.disabled) { send(buildBtn.dataset.cmd === 'stopBuild' ? 'stopBuild' : 'build'); } };
     runBtn.onclick = () => { if (!runBtn.disabled) { send(runBtn.dataset.cmd === 'stop' ? 'stop' : 'run'); } };
@@ -932,14 +983,14 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       if (m.type === 'status') { setStatus(m); }
       if (m.type === 'config') { setConfig(m); }
       if (m.type === 'deps') { setDeps(m.model); }
+      if (m.type === 'state') { applyState(m.state); }
     });
 
-    initCollapse();
-    setConfig(INITIAL.config);
-    setDeps(INITIAL.deps);
-    setRunning(INITIAL.running);
-    setJobs(INITIAL.activity);
-    setStatus(INITIAL.status);
+    applyState(INITIAL);
+    // LAST: INITIAL is only as fresh as the moment the view first resolved, and VS Code
+    // replays that html when the view comes back after a pane swap — so ask the
+    // extension for the current state. Keep this the last statement of the script.
+    vscode.postMessage({ ready: true });
   </script>
 </body>
 </html>`;

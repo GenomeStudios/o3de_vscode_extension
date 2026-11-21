@@ -19,21 +19,24 @@ with live status, Build/Run, utilities, and collapsible Configuration & Onboardi
 - **Guided workspace setup** — assemble the multi-root workspace (project + engine source + gems)
   into a `.code-workspace`, with `.vscode` settings generated for you. **Add Gems / Folders** adds
   more roots to the live workspace on demand.
-- **Build toolchain, Windows and Linux** — on **Windows**, auto-detects Visual Studio and opens a
-  developer terminal with the MSVC environment established, and detects Ninja (offering to install
-  it). On **Linux**, builds use gcc/clang + Ninja Multi-Config inherited from your shell — no MSVC
+- **Build toolchain, Windows and Linux** — on **Windows**, auto-detects Visual Studio (with several
+  installed, pin which one builds use from the dashboard's **Visual Studio** row, or leave it on
+  Auto for the newest) and opens a developer terminal with the MSVC environment established (also
+  offered as the **O3DE Developer (MSVC)** terminal profile, which you can make your default), and
+  detects Ninja (offering to install it). On **Linux**, builds use gcc/clang + Ninja Multi-Config inherited from your shell — no MSVC
   needed. The Onboarding panel checks whichever toolchain your OS actually uses.
 - **One-click CMake configure & build** — selectable generator, config, and target(s), mirroring
-  O3DE's build flow, with a process-guard for locked build outputs.
+  O3DE's build flow, with a process-guard for locked build outputs. **O3DE: Build When Editor
+  Closes** builds at once, or waits for an open Editor to close and then builds.
 - **Run & force-quit** — launch the Editor or the project's GameLauncher (with custom launch
-  options) and stop the whole process tree (AssetProcessor and friends included). Run is a toggle:
+  options, remembered in a recent list) and stop the whole process tree (AssetProcessor and friends included). Run is a toggle:
   pressing it (or `Ctrl+Alt+R`) while the app is up force-quits it (configurable).
 - **Advanced CMake flags** — an **Advanced** view manages extra `-D` cache variables passed to
   Configure (curated toggles for RenderDoc / `CMAKE_OBJECT_PATH_MAX`, plus any custom flag), stored
   per-project and applied on the next reconfigure.
 - **LLM connections (MCP)** — an opt-in localhost [MCP](https://modelcontextprotocol.io) endpoint so
-  an assistant like Claude can build, run, check run-state, read structured build results, and
-  read/change build config — per-project, off by default, localhost-bound.
+  an assistant like Claude can build, run, check run-state, read structured build results and the
+  app's logs, and read/change build config — per-project, off by default, localhost-bound.
 - **Class Creation Wizard** — launch O3DE's component/EBus class-scaffolding tool for the project's
   engine straight from the panel.
 - **C++ IntelliSense** — generates `c_cpp_properties.json` from the CMake File API and registers a
@@ -89,8 +92,10 @@ it walks through authoring, attaching a script to an entity, running it, and hit
 A registered O3DE project and engine, plus a platform toolchain. The extension's Onboarding panel
 checks these for you and helps fill the gaps.
 
-- **Windows** — **Visual Studio 2022** (Desktop development with C++), **CMake**, and optionally
-  **Ninja**.
+- **Windows** — **Visual Studio 2022 or newer** (Desktop development with C++), **CMake**, and optionally
+  **Ninja**. With several Visual Studios installed, choose which one is used with the
+  `o3de.build.visualStudio` setting, the dashboard's **Visual Studio** row, or
+  **O3DE: Select Visual Studio Version**; `auto` (the default) is the newest.
 - **Linux** — a C++ toolchain (**Clang** recommended, or **GCC**), **CMake**, and **Ninja**. Nothing
   to enable: the build / run / debug paths are active by default. `o3de.linuxSupport` can turn them
   off per project if you need to. Notes and a walkthrough live in

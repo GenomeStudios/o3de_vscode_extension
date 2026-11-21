@@ -11,8 +11,11 @@
 // ============================================================================
 
 import { Compiler } from "./buildOptions";
-import { ensureVisualStudio } from "../env/visualStudioGuard";
-import { captureMsvcEnvironmentDelta } from "../env/msvcEnvironment";
+import { log } from "../log";
+import { commandOutput } from "./commandOutput";
+import { checkVisualStudio } from "../env/visualStudioGuard";
+import { captureSelectedMsvcEnvironment } from "../env/visualStudioPreference";
+import { cachedCompilerMismatch, compilerMismatchWarning, readBuildCache } from "../env/visualStudio";
 import { detectGcc, detectClang } from "../deps/detectors";
 
 export interface ToolchainEnv {
@@ -23,23 +26,42 @@ export interface ToolchainEnv {
   label: string;
   /** Why resolution failed (populated only when ok is false). */
   reason?: string;
+  /** The Visual Studio the environment came from (Windows only; set when ok). */
+  visualStudio?: { displayName: string; installationPath: string };
+}
+
+export interface ToolchainOptions {
+  /** Headless callers (MCP): log only, never raise a notification. */
+  quiet?: boolean;
 }
 
 /**
  * Resolve the environment a configure/build must run in for the current platform
- * and the selected compiler. Windows captures the MSVC delta; Linux verifies the
- * compiler is installed and returns an empty delta (inherit the shell).
+ * and the selected compiler. Windows captures the MSVC delta of the selected Visual
+ * Studio (o3de.build.visualStudio); Linux verifies the compiler is installed and
+ * returns an empty delta (inherit the shell).
  */
-export async function resolveBuildEnvironment(compiler: Compiler): Promise<ToolchainEnv> {
+export async function resolveBuildEnvironment(compiler: Compiler, options: ToolchainOptions = {}): Promise<ToolchainEnv> {
   // ---- Windows: source the MSVC environment (vcvars64) --------------------
   if (process.platform === "win32") {
-    const vs = await ensureVisualStudio({ interactive: false });
+    const check = await checkVisualStudio({ interactive: false, quiet: options.quiet });
+    const vs = check.install;
     if (!vs?.vcvars64Path) {
-      return { ok: false, env: {}, label: "MSVC", reason: "No usable Visual Studio (MSVC) — vcvars64.bat not found." };
+      return {
+        ok: false,
+        env: {},
+        label: "MSVC",
+        reason: check.problem ?? "No usable Visual Studio (MSVC) — vcvars64.bat not found.",
+      };
     }
     try {
-      const env = await captureMsvcEnvironmentDelta(vs.vcvars64Path);
-      return { ok: true, env, label: `MSVC (${vs.displayName ?? "Visual Studio"})` };
+      const env = await captureSelectedMsvcEnvironment(vs.vcvars64Path);
+      return {
+        ok: true,
+        env,
+        label: `MSVC (${vs.displayName ?? "Visual Studio"})`,
+        visualStudio: { displayName: vs.displayName, installationPath: vs.installationPath },
+      };
     } catch (err) {
       const message = (err as { message?: string }).message ?? String(err);
       return { ok: false, env: {}, label: "MSVC", reason: `Failed to establish the MSVC environment: ${message}` };
@@ -61,4 +83,25 @@ export async function resolveBuildEnvironment(compiler: Compiler): Promise<Toolc
     };
   }
   return { ok: true, env: {}, label: `${useClang ? "Clang" : "GCC"}${probe.detail ? ` ${probe.detail}` : ""}` };
+}
+
+// ---- Build tree vs. selected Visual Studio ---------------------------------
+/**
+ * CMake keeps the compiler it cached at the first configure, while every Configure/Build captures the environment
+ * of the CURRENTLY selected Visual Studio. When the two differ (a newer Visual Studio took over, or the selection
+ * changed) say so once, in the Build Output channel and the log. A warning only: nothing is blocked or cleared.
+ */
+export function warnIfCompilerMismatch(buildDir: string, toolchain: ToolchainEnv): void {
+  const selected = toolchain.visualStudio;
+  if (!selected) {
+    return;
+  }
+  const cache = readBuildCache(buildDir);
+  const compiler = cache === undefined ? undefined : cachedCompilerMismatch(cache, selected.installationPath);
+  if (!compiler) {
+    return;
+  }
+  const line = compilerMismatchWarning(buildDir, compiler, selected.displayName);
+  log().warn(line);
+  commandOutput().appendLine(line);
 }

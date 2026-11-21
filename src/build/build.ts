@@ -22,7 +22,9 @@ import { targetsLabel } from "./buildCommand";
 import { configureProject } from "./configure";
 import { buildJobKey } from "./buildRun";
 import { startBuildJob } from "./buildJobs";
-import { cancelManagedCommand, managedJob } from "./managedCommand";
+import { describeWait, EditorWaitOutcome, waitForProcessesToExit } from "./editorWait";
+import { runningGuardedProcesses } from "./processGuard";
+import { cancelManagedCommand, managedJob, runningJobOfKind } from "./managedCommand";
 import { BuildResult } from "./buildOutput";
 import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 
@@ -59,6 +61,78 @@ export async function buildProject(options: BuildOptions): Promise<void> {
   reportOutcome(result);
 }
 
+// ---- Build When Editor Closes ------------------------------------------------
+// The catch-all: build now if no Editor is open, otherwise wait for it to close and then build. The wait lives
+// OUTSIDE the build job, so the build itself (its guard, busy checks and Stop) is exactly the ordinary one.
+let waitingForEditor = false;
+
+/** `probe` lists the Editor processes still open; the tests replace it. */
+export async function buildWhenEditorCloses(
+  options: BuildOptions,
+  probe: () => Promise<string[]> = runningGuardedProcesses,
+): Promise<void> {
+  if (waitingForEditor) {
+    void vscode.window.showInformationMessage("Already waiting for the Editor to close.");
+    return;
+  }
+  if (refuseWhileBuilding()) {
+    return;
+  }
+
+  if ((await probe()).length > 0) {
+    waitingForEditor = true;
+    let outcome: EditorWaitOutcome;
+    try {
+      outcome = await waitForEditorWithNotification(probe);
+    } finally {
+      waitingForEditor = false;
+    }
+    if (outcome.status !== "clear") {
+      log().info("Build When Editor Closes: cancelled while waiting — no build was started.");
+      return;
+    }
+    log().info("Build When Editor Closes: the Editor closed — building.");
+    if (refuseWhileBuilding()) {
+      return; // a build was started while this one waited (the Build button's "Close & Build", or MCP)
+    }
+  }
+
+  await buildProject(options);
+}
+
+/**
+ * Say so and return true when a build is already running. The Build button turns into Stop then; this command
+ * would otherwise join the running build and report its result a second time.
+ */
+function refuseWhileBuilding(): boolean {
+  if (runningJobOfKind("build") === undefined) {
+    return false;
+  }
+  void vscode.window.showInformationMessage("O3DE: a build is already running — use Stop Build to cancel it.");
+  return true;
+}
+
+/** A cancellable notification that counts the wait; Cancel stops waiting and kills nothing. */
+function waitForEditorWithNotification(probe: () => Promise<string[]>): Thenable<EditorWaitOutcome> {
+  return vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: "Waiting for Editor.exe to close, then building", cancellable: true },
+    (progress, token) => {
+      const cancel = new AbortController();
+      token.onCancellationRequested(() => cancel.abort());
+      return waitForProcessesToExit({
+        probe,
+        signal: cancel.signal,
+        onWaiting: (running, elapsedMs) => {
+          if (running.length > 0) {
+            progress.report({ message: describeWait(running, elapsedMs) });
+          }
+        },
+      });
+    },
+  );
+}
+
+// ---- Stop / status -----------------------------------------------------------
 /** Stop the running build for the workspace's project (its whole process tree). */
 export async function stopBuild(): Promise<boolean> {
   const project = await resolveWorkspaceProject("O3DE: Stop Build");

@@ -12,6 +12,7 @@ import {
   CHECKS,
 } from "../deps/registry";
 import { Intent } from "../deps/registry";
+import { configuredThirdParty, thirdPartyCheck } from "../deps/detectors";
 
 const WIN = "win32" as NodeJS.Platform;
 const LINUX = "linux" as NodeJS.Platform;
@@ -54,6 +55,11 @@ suite("Onboarding deps — tracks + platform", () => {
     assert.ok(win.includes("visualStudio") && !win.includes("gcc"));
     const lin = activeChecks(intents("cpp"), LINUX).map((c) => c.id);
     assert.ok(lin.includes("gcc") && !lin.includes("visualStudio") && !lin.includes("windowsSdk"));
+  });
+
+  test("the Visual Studio row label names no year (any installed version can satisfy it)", () => {
+    const vs = CHECKS.find((c) => c.id === "visualStudio")!;
+    assert.ok(!/20\d\d/.test(vs.label), `label should not name a year: ${vs.label}`);
   });
 
   test("appliesToPlatform respects the platforms field", () => {
@@ -128,5 +134,39 @@ suite("Onboarding deps — blocking + next step", () => {
     assert.strictEqual(rampProgress(results, intents("cpp", "lua"), LINUX).total, 11);
     results["ninja"] = { state: "missing" };
     assert.strictEqual(rampProgress(results, intents("cpp"), WIN).done, rampProgress(allOk(), intents("cpp"), WIN).done - 1);
+  });
+});
+
+// ---- 3rd Party path row (#36) -- the Advanced tab's LY_3RDPARTY_PATH counts, like in Configure ----
+suite("Onboarding deps — the 3rd Party path row", () => {
+  const HOME = "/home/x";
+  const check = (manifest: string | undefined, flags: Record<string, string> | undefined, present: string[]) =>
+    thirdPartyCheck(configuredThirdParty(manifest, flags, HOME), (folder) => present.includes(folder));
+
+  test("an Advanced-tab path that exists beats a manifest folder that is gone", () => {
+    const result = check("/old/3rdParty", { LY_3RDPARTY_PATH: "/new/3rdParty" }, ["/new/3rdParty"]);
+    assert.strictEqual(result.state, "ok");
+    assert.ok(result.detail?.startsWith("/new/3rdParty"), result.detail);
+  });
+
+  test("an Advanced-tab path with no manifest default is ok, not missing", () => {
+    assert.strictEqual(check(undefined, { LY_3RDPARTY_PATH: "/new/3rdParty" }, ["/new/3rdParty"]).state, "ok");
+  });
+
+  test("an Advanced-tab path to a folder that does not exist warns and says so", () => {
+    const result = check("/old/3rdParty", { LY_3RDPARTY_PATH: "/new/3rdParty" }, ["/old/3rdParty"]);
+    assert.strictEqual(result.state, "warn");
+    assert.ok(result.detail?.includes("(missing)"), result.detail);
+  });
+
+  test("the manifest folder alone: ok when it exists, warn when it is missing", () => {
+    assert.strictEqual(check("/old/3rdParty", undefined, ["/old/3rdParty"]).state, "ok");
+    assert.strictEqual(check("/old/3rdParty", undefined, []).state, "warn");
+  });
+
+  test("nothing set is missing: the ~/.o3de/3rdParty fallback alone does not turn the row green", () => {
+    assert.strictEqual(check(undefined, undefined, []).state, "missing");
+    assert.strictEqual(check(undefined, undefined, [`${HOME}/.o3de/3rdParty`]).state, "missing");
+    assert.strictEqual(check(undefined, { LY_3RDPARTY_PATH: "  " }, []).state, "missing", "a blank flag names nothing");
   });
 });

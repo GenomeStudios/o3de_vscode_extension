@@ -16,6 +16,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+import { readCachedValue } from "../build/configureCommand";
 
 const execFileAsync = promisify(execFile);
 
@@ -173,4 +174,126 @@ export function pickBestInstall(
     (best, cur) => (!best || isNewerVersion(cur.version, best.version) ? cur : best),
     undefined,
   );
+}
+
+// ============================================================================
+//  Selection (pure) — which install the user wants the MSVC environment from.
+//
+//  `o3de.build.visualStudio` is "auto" (the newest install, the old behaviour) or
+//  a year that pins one Visual Studio, so a newly installed version never takes
+//  over. The year is derived from the install's MAJOR version, never from vswhere's
+//  productLineVersion (it reports "18" for Visual Studio 2026).
+// ============================================================================
+
+export type VsYear = "2019" | "2022" | "2026";
+export type VsPreference = "auto" | VsYear;
+export const VS_PREFERENCES: VsPreference[] = ["auto", "2019", "2022", "2026"];
+
+// Pinnable years -> installationVersion major.
+const MAJOR_BY_YEAR: Record<VsYear, number> = { "2019": 16, "2022": 17, "2026": 18 };
+// Display only: 2017 can be named but not pinned.
+const YEAR_BY_MAJOR: Record<number, string> = { 15: "2017", 16: "2019", 17: "2022", 18: "2026" };
+
+export function isVsPreference(value: unknown): value is VsPreference {
+  return typeof value === "string" && (VS_PREFERENCES as string[]).includes(value);
+}
+
+/** The major of a dotted version ("17.14.2" -> 17); undefined for "unknown" or garbage. */
+export function vsMajor(version: string): number | undefined {
+  const major = Number.parseInt(version.split(".")[0], 10);
+  return Number.isNaN(major) ? undefined : major;
+}
+
+/** The product year of an install ("2026"), "v<major>" for a version this table doesn't know, undefined when unreadable. */
+export function vsYear(install: Pick<VisualStudioInstall, "version">): string | undefined {
+  const major = vsMajor(install.version);
+  return major === undefined ? undefined : (YEAR_BY_MAJOR[major] ?? `v${major}`);
+}
+
+/**
+ * The install a preference selects. auto = the best install (pickBestInstall); a year = the best install of that
+ * major, so a pinned install lacking the C++ tools is still returned (the guard then warns about it). An install
+ * whose version is unreadable (the fallback probe) never matches a pin.
+ */
+export function pickInstall(installs: VisualStudioInstall[], preference: VsPreference): VisualStudioInstall | undefined {
+  if (preference === "auto") {
+    return pickBestInstall(installs);
+  }
+  const major = MAJOR_BY_YEAR[preference];
+  return pickBestInstall(installs.filter((i) => vsMajor(i.version) === major));
+}
+
+/** Why pickInstall found nothing: what is selected and what is installed instead. */
+export function explainSelection(preference: VsPreference, installs: VisualStudioInstall[]): string {
+  if (installs.length === 0) {
+    return "No Visual Studio installation was found.";
+  }
+  if (preference === "auto") {
+    return "No usable Visual Studio installation was found.";
+  }
+  const unreadable = installs.filter((i) => vsMajor(i.version) === undefined).length;
+  return (
+    `Visual Studio ${preference} is selected (o3de.build.visualStudio) but not installed. ` +
+    `Found: ${installs.map((i) => i.displayName).join(", ")}.` +
+    (unreadable > 0 ? ` ${unreadable} of them could not report a version, so they cannot match a pinned year.` : "")
+  );
+}
+
+export function lacksCppToolsMessage(install: VisualStudioInstall): string {
+  return `${install.displayName} lacks the MSVC C++ toolset.`;
+}
+
+/** What is wrong with the pick, if anything: nothing selected (explainSelection) or the selected install has no C++ tools. */
+export function selectionProblem(
+  preference: VsPreference,
+  installs: VisualStudioInstall[],
+  chosen: VisualStudioInstall | undefined,
+): string | undefined {
+  if (!chosen) {
+    return explainSelection(preference, installs);
+  }
+  return chosen.hasCppTools ? undefined : lacksCppToolsMessage(chosen);
+}
+
+// ---- A build tree's cached compiler ----------------------------------------
+function normalisePath(p: string): string {
+  return p.replace(/\\/g, "/").toLowerCase();
+}
+
+/** True for a compiler path inside a Visual Studio install ("…/Microsoft Visual Studio/…" or "…/VC/Tools/MSVC/…"). */
+function isMsvcCompilerPath(compiler: string): boolean {
+  const p = normalisePath(compiler);
+  return p.includes("/microsoft visual studio/") || p.includes("/vc/tools/msvc/");
+}
+
+/**
+ * The compiler CMake cached for a build tree (CMAKE_CXX_COMPILER) when it is an MSVC compiler that does NOT live
+ * under the selected install; undefined when it matches, is not MSVC (clang, gcc), or the cache names none.
+ * CMake keeps the cached compiler, so this is how "the build switched Visual Studio" shows.
+ */
+export function cachedCompilerMismatch(cacheText: string, installationPath: string): string | undefined {
+  const compiler = readCachedValue(cacheText, "CMAKE_CXX_COMPILER");
+  if (!compiler || !isMsvcCompilerPath(compiler)) {
+    return undefined;
+  }
+  const root = normalisePath(installationPath).replace(/\/+$/, "");
+  return normalisePath(compiler).startsWith(`${root}/`) ? undefined : compiler;
+}
+
+/** The one-line warning for a build tree whose cached compiler is outside the selected Visual Studio. */
+export function compilerMismatchWarning(buildDir: string, compiler: string, selectedDisplayName: string): string {
+  return (
+    `${buildDir} was configured with ${compiler}; the selected Visual Studio is ${selectedDisplayName}. ` +
+    "The build tree keeps its compiler: select the matching version in the dashboard's Visual Studio row, " +
+    "or delete CMakeCache.txt and CMakeFiles and Configure to switch."
+  );
+}
+
+/** A build tree's CMakeCache.txt text, or undefined when there is none (not configured yet). */
+export function readBuildCache(buildDir: string): string | undefined {
+  try {
+    return fs.readFileSync(path.join(buildDir, "CMakeCache.txt"), "utf8");
+  } catch {
+    return undefined;
+  }
 }

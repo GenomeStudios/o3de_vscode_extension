@@ -15,8 +15,12 @@ import * as vscode from "vscode";
 import type { GuidedAction } from "./registry";
 import { resolveClangdExecutable } from "./clangdServer";
 import { defaultLlvmBinDir } from "./llvm";
-import { findVisualStudioInstalls, pickBestInstall } from "../env/visualStudio";
+import { explainSelection, findVisualStudioInstalls } from "../env/visualStudio";
+import { readVsPreference, selectInstall } from "../env/visualStudioPreference";
 import { findNinja } from "../build/ninja";
+import { readCmakeFlags } from "../build/configureArgs";
+import { resolveThirdPartyPath, ThirdPartySource } from "../build/configureCommand";
+import { firstWorkspaceProject } from "../build/projectResolve";
 import { readManifest } from "../o3de/manifest";
 import { discoverEngines } from "../o3de/discovery";
 import { readProject } from "../o3de/identity";
@@ -52,15 +56,20 @@ function probe(exe: string, args: string[], re: RegExp): Promise<CheckResult> {
 
 // ---- Build toolchain -------------------------------------------------------
 
+// The install o3de.build.visualStudio selects, and how it was chosen: "(pinned 2022)" or "(auto: newest)".
 export async function detectVisualStudio(): Promise<CheckResult> {
-  const best = pickBestInstall(await findVisualStudioInstalls());
-  if (!best) {
-    return { state: "missing" };
+  const installs = await findVisualStudioInstalls();
+  const preference = readVsPreference();
+  const chosen = selectInstall(installs);
+  if (!chosen) {
+    // A pinned year that is not installed says so; plain "nothing installed" keeps its bare red state.
+    return { state: "missing", detail: preference === "auto" ? undefined : explainSelection(preference, installs) };
   }
-  if (!best.hasCppTools) {
-    return { state: "warn", detail: `${best.displayName} — no C++ workload` };
+  const how = preference === "auto" ? "auto: newest" : `pinned ${preference}`;
+  if (!chosen.hasCppTools) {
+    return { state: "warn", detail: `${chosen.displayName} — no C++ workload (${how})` };
   }
-  return { state: "ok", detail: best.displayName };
+  return { state: "ok", detail: `${chosen.displayName} (${how})` };
 }
 
 export function detectCMake(): Promise<CheckResult> {
@@ -171,12 +180,44 @@ export function detectProjectEnabled(): CheckResult {
   }
 }
 
-export function detectThirdParty(): CheckResult {
-  const folder = readManifest()?.defaultThirdPartyFolder;
-  if (!folder) {
+// ---- 3rd-party path (the row and the Environment Report share these) ------
+
+export interface ConfiguredThirdParty {
+  path: string;
+  source: ThirdPartySource;
+}
+
+/**
+ * The 3rd-party path the Advanced tab's LY_3RDPARTY_PATH or the manifest names, by Configure's own precedence
+ * (resolveThirdPartyPath). undefined when neither names one: the ~/.o3de/3rdParty fallback alone is not "set up".
+ */
+export function configuredThirdParty(
+  manifestFolder: string | undefined,
+  flags: Record<string, string> | undefined,
+  home: string,
+): ConfiguredThirdParty | undefined {
+  const resolved = resolveThirdPartyPath(manifestFolder, flags, home);
+  return resolved.source === "default" ? undefined : resolved;
+}
+
+/** The 3rd-party path for the workspace project right now (its Advanced-tab flags, else the manifest). */
+export function workspaceThirdParty(): ConfiguredThirdParty | undefined {
+  const project = firstWorkspaceProject();
+  const flags = project ? readCmakeFlags(project.path) : undefined;
+  return configuredThirdParty(readManifest()?.defaultThirdPartyFolder, flags, os.homedir());
+}
+
+/** The row for a configured path: ok when the folder exists, warn when it is missing; missing when none is set. */
+export function thirdPartyCheck(configured: ConfiguredThirdParty | undefined, exists: (folder: string) => boolean): CheckResult {
+  if (!configured) {
     return { state: "missing" };
   }
-  return fs.existsSync(folder) ? { state: "ok", detail: folder } : { state: "warn", detail: `${folder} (missing)` };
+  const found = exists(configured.path);
+  return { state: found ? "ok" : "warn", detail: `${configured.path}${found ? "" : " (missing)"} (${configured.source})` };
+}
+
+export function detectThirdParty(): CheckResult {
+  return thirdPartyCheck(workspaceThirdParty(), fs.existsSync);
 }
 
 // Whether this extension's .vscode/settings.json (CMake + C++ wiring) is written.

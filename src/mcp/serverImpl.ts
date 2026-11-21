@@ -9,14 +9,16 @@
 //  HTTP with session routing. A client's `initialize` mints a session id; the
 //  client echoes it (mcp-session-id header) on every later request and we route
 //  it to that session's transport. Every request must carry the bearer token.
-//  Tools: health (o3de_ping), build (o3de_build + _status/_log), configure
-//  (o3de_configure + _status), o3de_stop, run (o3de_is_running, o3de_run),
-//  config (o3de_get/set_config incl. CMake flags, o3de_list_targets),
+//  Tools: health (o3de_ping), build (o3de_build, which can wait for the Editor to close + _status/_log), configure
+//  (o3de_configure + _status), o3de_stop, run (o3de_is_running, o3de_run, o3de_run_debug, o3de_read_run_log),
+//  config (o3de_get/set_config incl. CMake flags + launch-args history + the Visual Studio selection,
+//  o3de_list_targets), Visual Studio (o3de_visual_studio_status),
 //  and IntelliSense (o3de_intellisense_status, o3de_set_intellisense_engine,
 //  o3de_update_clangd_database).
 // ============================================================================
 
 import * as http from "http";
+import { basename } from "path";
 import { AddressInfo } from "net";
 import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -33,8 +35,20 @@ import { cancelManagedCommand, managedJob } from "../build/managedCommand";
 import { buildJobKey, configureJobKey } from "../build/jobKeys";
 import { firstWorkspaceProject } from "../build/projectResolve";
 import { BuildResult } from "../build/buildOutput";
+import { describeWait, waitForProcessesToExit } from "../build/editorWait";
+import { runningGuardedProcesses } from "../build/processGuard";
 import { configSnapshot, applyConfig, listTargets } from "../build/configQuery";
-import { runStatus, launchRunTarget, forceCloseRuntime } from "../build/runQuery";
+import { visualStudioStatus } from "../env/visualStudioQuery";
+import {
+  runStatus,
+  launchRunTarget,
+  monitorLaunch,
+  launchDebugTarget,
+  readRunLog,
+  forceCloseRuntime,
+  RunLogReport,
+} from "../build/runQuery";
+import { MAX_TAIL_LINES } from "../build/runLog";
 import { intellisenseReport, setIntelliSenseEngine, updateClangdDatabase } from "../intellisense/intellisenseQuery";
 import { syncMessage } from "../intellisense/clangdSync";
 import type { Memento } from "vscode";
@@ -51,6 +65,7 @@ const SESSION_HEADER = "mcp-session-id";
 const MAX_BLOCK_MS = 20 * 60_000; // cap on a held-open (progress-streamed) build
 const HEARTBEAT_MS = 5_000; // progress cadence while blocking
 const INLINE_WAIT_MS = 20_000; // no progress token → short wait, then a handle
+const DEFAULT_EDITOR_WAIT_MINUTES = 30; // o3de_build waitForEditorExit: how long to wait for the Editor to close
 
 export interface McpHttpOptions {
   port: number;
@@ -216,6 +231,11 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         "Build the O3DE project (cmake --build) and return structured pass/fail plus parsed compiler/linker " +
         "diagnostics — so you can compile a change and react to the errors. Windows/MSVC only. The Editor must " +
         "be CLOSED (a running Editor locks gem DLLs and the link step fails; reports blocked:editor-running if so). " +
+        "Pass waitForEditorExit:true to wait for the Editor to be closed and then build, instead of refusing: " +
+        "it waits up to maxWaitMinutes (default 30), streaming progress, and reports blocked:editor-running if it " +
+        "is still open. A client that sends no progress token waits only ~20s, so it should ask the user to close " +
+        "the Editor and call again. Ask the user before waiting on an Editor they may be using; cancelling the call " +
+        "stops the wait without building. " +
         "This BLOCKS until the build finishes and returns the full result in one call (progress is streamed while " +
         "it runs) — no polling needed in the normal case. Only if a build exceeds ~20 min does it return a buildId " +
         "with state:running, after which you poll o3de_build_status then o3de_build_log. The finished result is also " +
@@ -229,16 +249,39 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
           .enum(["profile", "debug", "release"])
           .optional()
           .describe("Build configuration. Omit to use the panel selection."),
+        waitForEditorExit: z
+          .boolean()
+          .optional()
+          .describe("If the Editor (or Script Canvas) is running, wait for it to close and then build, instead of returning blocked:editor-running."),
+        maxWaitMinutes: z
+          .number()
+          .int()
+          .min(1)
+          .max(60)
+          .optional()
+          .describe(`With waitForEditorExit: the longest to wait for the Editor to close, in minutes (default ${DEFAULT_EDITOR_WAIT_MINUTES}).`),
       },
     },
-    async (args: { targets?: string[]; config?: BuildConfig }, extra) => {
+    async (args: { targets?: string[]; config?: BuildConfig; waitForEditorExit?: boolean; maxWaitMinutes?: number }, extra) => {
       const config = args.config ?? opts.buildOptions.config;
       const targets = args.targets ?? opts.buildOptions.targets;
+
+      // The wait and the build are one call, so they share one progress count (MCP progress must keep increasing).
+      const progress: ProgressCounter = { step: 0 };
+
+      // Nothing to wait for without a project, or when a build is already running (this call just joins it).
+      if (args.waitForEditorExit && firstWorkspaceProject() && getBuildJob()?.state !== "running") {
+        const refusal = await waitForEditorExit(extra, args.maxWaitMinutes ?? DEFAULT_EDITOR_WAIT_MINUTES, progress);
+        if (refusal) {
+          return buildResultContent(editorRunningResult(config, targets, refusal));
+        }
+      }
+
       const job = startBuildJob({ generator: opts.buildOptions.generator, config, targets, coreCount: opts.buildOptions.coreCount });
 
       // Block until done, streaming progress heartbeats if the client gave us a token (see holdUntilDone).
       const started = Date.now();
-      await holdUntilDone(extra, job, (elapsed) => `Building ${config}… ${elapsed}s elapsed`);
+      await holdUntilDone(extra, job, (elapsed) => `Building ${config}… ${elapsed}s elapsed`, progress);
 
       if (job.result) {
         return buildResultContent(job.result); // finished — return the full result inline
@@ -327,7 +370,9 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         "generator and compiler, passing the Advanced tab's CMake flags (see o3de_get_config cmakeFlags). Needed on first " +
         "setup, after changing CMake flags or build files, or when o3de_build reports blocked:not-configured. Never prompts: " +
         "if the build tree was configured with a different generator it returns blocked:generator-mismatch instead of " +
-        "clearing the CMake cache (ask the user). Refuses while a build or configure runs (blocked:busy). BLOCKS until done " +
+        "clearing the CMake cache (ask the user). On Windows the compiler environment comes from the selected Visual Studio " +
+        "(o3de_visual_studio_status); a build tree configured with a different one logs a warning and keeps its compiler. " +
+        "Refuses while a build or configure runs (blocked:busy). BLOCKS until done " +
         "with progress streamed; a very long first configure (3rd-party downloads) returns a configureId with " +
         "state:running — poll o3de_configure_status. The result is also written to <project>/user/o3de-configure-result.json.",
       inputSchema: {},
@@ -407,7 +452,8 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       title: "O3DE Is Running",
       description:
         "Check whether the O3DE Editor or GameLauncher is currently running for the workspace project — WITHOUT " +
-        "building. A running Editor locks the gem DLLs, so o3de_build fails the link with blocked:editor-running; " +
+        "building. A running Editor locks the gem DLLs, so o3de_build fails the link with blocked:editor-running " +
+        "(o3de_build waitForEditorExit waits for the user to close it first); " +
         "call this first to know the app's state (and after o3de_run to confirm it came up). Detects both apps this " +
         "extension launched and any started outside it (tasklist). Returns running true/false plus the images checked.",
       inputSchema: {},
@@ -431,7 +477,14 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       description:
         "Launch the run target (Editor, GameLauncher, or any executable CMake target) detached — the 'run' half of " +
         "a build-and-run flow — using the O3DE panel's run target, config, and launch args unless overridden. " +
-        "Returns IMMEDIATELY once launched (it does not block); use o3de_is_running to confirm it is up. The exe " +
+        "Returns immediately unless settleSeconds is set; use o3de_is_running to confirm it is up. With " +
+        "settleSeconds (1-30) it waits that long for the app to exit and returns monitor: state " +
+        "running|exited, waitedSeconds, and the tail of the target's log (null for a custom exe). stale:true means " +
+        "that log was last written before this launch, so its lines are from an earlier run. monitor.errorLog (the " +
+        "tail of error.log) is present only when error.log was written since this launch: the app hit a fatal error. " +
+        "A crashed Editor can stay alive on its crash dialog, so state running alone does not mean the launch " +
+        "survived. There is no exit code (the app is detached, its output is not captured) — read more with " +
+        "o3de_read_run_log. The exe " +
         "must be built first (o3de_build the run target). If an app is already running for the project it is left " +
         "alone (alreadyRunning) — this tool never force-closes a running app; stopping stays a user action in the " +
         "O3DE panel. Windows/MSVC only.",
@@ -447,21 +500,120 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
           .enum(["profile", "debug", "release"])
           .optional()
           .describe("Build config to run. Omit to use the panel selection."),
+        settleSeconds: z
+          .number()
+          .int()
+          .min(0)
+          .max(30)
+          .optional()
+          .describe("Seconds to wait after launching for an early exit, then report state + log tail. Default 0: return at once."),
       },
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async (args: { target?: RunTarget; config?: BuildConfig }) => {
+    async (args: { target?: RunTarget; config?: BuildConfig; settleSeconds?: number }, extra) => {
+      const launchedAt = Date.now();
       const result = launchRunTarget(opts.buildOptions, { target: args.target, config: args.config });
+
+      // Optional settle: hold briefly after a successful launch, then say whether it is still up (see monitorLaunch).
+      const settleSeconds = args.settleSeconds ?? 0;
+      const project = result.launched && settleSeconds > 0 ? firstWorkspaceProject() : undefined;
+      const monitor = project ? await monitorLaunch(project.path, result.target, settleSeconds, launchedAt, extra.signal) : undefined;
+
+      const launchLine = `Launched ${result.target} (${result.config}, pid ${result.pid}).`;
+      const monitorLine = monitor
+        ? ` ${monitor.state === "running" ? "Still running" : "Exited"} after ${monitor.waitedSeconds}s.` +
+          (monitor.stale ? " Its log was last written before this launch." : "") +
+          (monitor.errorLog ? " error.log was written since this launch: the app hit a fatal error and may be waiting on a crash dialog." : "")
+        : "";
       const line = result.launched
-        ? `Launched ${result.target} (${result.config}, pid ${result.pid}).`
+        ? launchLine + monitorLine
         : result.alreadyRunning
           ? `${result.target} already running — left alone.`
           : `Did not launch: ${result.reason}`;
       return {
-        content: [txt(line), txt(JSON.stringify(result, null, 2))],
-        // alreadyRunning is a valid, non-error outcome; only a genuine failure is an error.
+        content: [txt(line), txt(JSON.stringify(monitor ? { ...result, monitor } : result, null, 2))],
+        // alreadyRunning is a valid, non-error outcome; only a genuine failure is an error. A launched app that
+        // exited within the settle time is a reported result, not a tool error.
         isError: !result.launched && !result.alreadyRunning,
       };
+    },
+  );
+
+  server.registerTool(
+    "o3de_run_debug",
+    {
+      title: "O3DE Run in Debug",
+      description:
+        "Launch the run target (Editor, GameLauncher, or any executable CMake target) under VS Code's C++ debugger — " +
+        "the dashboard's Run in Debug — using the O3DE panel's run target, config, and launch args unless overridden, " +
+        "so the user's breakpoints hit. Needs the Microsoft C/C++ extension (ms-vscode.cpptools; Microsoft marketplace " +
+        "only, so absent in VSCodium / Open VSX editors / Cursor); without it the result is blocked:no-debugger and this " +
+        "tool never installs it. The exe must be built first (o3de_build the run target; config 'debug' or 'profile' " +
+        "for symbols). Returns once the debug session has started (it does not wait for the app to exit) with the " +
+        "session and debugType. The debuggee's output goes to VS Code's terminal, not to this call — read the logs with " +
+        "o3de_read_run_log. If that exe is already running, or another debug start is in progress, it is left alone " +
+        "(blocked:already-running); this tool never " +
+        "closes anything. Stopping the session is the user's Debug toolbar (or o3de_force_close when enabled).",
+      inputSchema: {
+        target: z
+          .string()
+          .optional()
+          .describe(
+            "Run target to debug: 'Editor', 'GameLauncher', or any executable CMake target name " +
+              "(see o3de_list_targets executables). Omit to use the panel selection.",
+          ),
+        config: z
+          .enum(["profile", "debug", "release"])
+          .optional()
+          .describe("Build config to debug. Omit to use the panel selection."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async (args: { target?: RunTarget; config?: BuildConfig }) => {
+      const result = await launchDebugTarget(opts.buildOptions, { target: args.target, config: args.config });
+      const line = result.started
+        ? `Started ${result.target} (${result.config}) under the ${result.debugType} debugger.`
+        : result.blocked === "already-running"
+          ? `${result.target} already running — left alone.`
+          : `Did not start (${result.blocked}): ${result.reason}`;
+      return {
+        content: [txt(line), txt(JSON.stringify(result, null, 2))],
+        // already-running is a valid, non-error outcome; every other refusal is an error.
+        isError: !result.started && result.blocked !== "already-running",
+      };
+    },
+  );
+
+  server.registerTool(
+    "o3de_read_run_log",
+    {
+      title: "O3DE Read Run Log",
+      description:
+        "Read the end of one of the workspace project's O3DE logs from <project>/user/log: Editor.log (the Editor), " +
+        "Game.log (the GameLauncher) or error.log (crash / fatal output). Use it after o3de_run or o3de_run_debug to see " +
+        "whether the app came up or why it died; the app's own console output is not captured anywhere else. Works " +
+        "while the app is still running. Returns the last tailLines lines (default 100, max 500; the text is also " +
+        "capped at about 48,000 characters, most recent kept, with truncated:true when that cut lines you asked for), " +
+        "plus modifiedAt and ageSeconds — check them to tell whether the log is from the current run. exists:false " +
+        "means the app has not written that log yet. log 'auto' picks the log of the selected run target.",
+      inputSchema: {
+        log: z
+          .enum(["auto", "editor", "game", "error"])
+          .optional()
+          .describe("Which log: editor = Editor.log, game = Game.log, error = error.log. Default 'auto' (the run target's log)."),
+        tailLines: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_TAIL_LINES)
+          .optional()
+          .describe(`How many lines from the end of the log. Default 100, max ${MAX_TAIL_LINES}.`),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async (args: { log?: "auto" | "editor" | "game" | "error"; tailLines?: number }) => {
+      const report = readRunLog(opts.buildOptions, { log: args.log, tailLines: args.tailLines });
+      return { content: [txt(runLogSummary(report)), txt(JSON.stringify(report, null, 2))] };
     },
   );
 
@@ -498,9 +650,13 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
       title: "O3DE Get Config",
       description:
         "Read the current O3DE build options — generator, compiler, build config, selected targets, run target, " +
-        "launch args, parallel core count — plus the valid choices for each and the resolved project + build directory. " +
+        "launch args (with launchArgsHistory, the remembered launch args, most recent first), parallel core count — plus " +
+        "the valid choices for each and the resolved project + build directory. " +
         "cmakeFlags lists the Advanced tab's extra CMake cache variables, each with its stored value, what CMakeCache.txt " +
         "holds, and whether it's applied; cmakeFlags.pending true means o3de_configure is needed for them to take effect. " +
+        "A cmakeFlags LY_3RDPARTY_PATH replaces the O3DE manifest's default 3rd-party path for o3de_configure. " +
+        "On Windows, visualStudio reports which Visual Studio's MSVC environment configure and build use: the preference " +
+        "(auto = the newest installed, or a pinned year), what it resolves to now, and the choices. " +
         "Use this before o3de_set_config, o3de_configure or o3de_build.",
       inputSchema: {},
     },
@@ -519,8 +675,17 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         "Change one or more O3DE build options (the same state the panel shows and that o3de_build/o3de_run use). " +
         "Only the fields you pass change; others are left alone. Returns the updated config. cmakeFlags edits the Advanced " +
         "tab's CMake cache variables for the project (a value sets one; an empty string or null removes it; unlisted flags " +
-        "are kept) — they take effect on the next o3de_configure. Changing the generator also needs o3de_configure before " +
-        "the next build.",
+        "are kept) — they take effect on the next o3de_configure; a LY_3RDPARTY_PATH flag replaces the O3DE manifest's " +
+        "default 3rd-party path. launchArgs is also remembered in the launch-args history (o3de_get_config launchArgsHistory); " +
+        "launchArgsHistory replaces that history, applied after launchArgs. " +
+        "visualStudio (Windows only; an error elsewhere) selects which Visual Studio's MSVC environment configure, build " +
+        "and the O3DE Developer terminal use: 'auto' = the newest installed with C++ tools, or a year to pin one " +
+        "(a newly installed Visual Studio then never takes over). It is saved to the USER settings, and the result " +
+        "reports the value actually in force: a workspace or folder value of o3de.build.visualStudio overrides it. A build " +
+        "tree keeps the compiler it was configured with, so switching an existing tree also needs " +
+        "<project>/build/windows/CMakeCache.txt and CMakeFiles deleted before o3de_configure (o3de_configure never clears them; " +
+        "o3de_visual_studio_status reports configuredWith.mismatch). " +
+        "Changing the generator also needs o3de_configure before the next build.",
       inputSchema: {
         generator: z.enum(["Ninja Multi-Config", "Visual Studio 17 2022"]).optional(),
         compiler: z.enum(["MSVC", "Clang"]).optional(),
@@ -535,8 +700,22 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
           .describe(
             "'Editor', 'GameLauncher', or any executable CMake target name (see o3de_list_targets executables).",
           ),
-        launchArgs: z.string().optional().describe("Extra args passed when running (blank to clear)."),
+        launchArgs: z
+          .string()
+          .optional()
+          .describe("Extra args passed when running (blank to clear). Also recorded into the launch-args history."),
+        launchArgsHistory: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Replace the remembered launch args (most recent first, at most 10); [] forgets them all. " +
+              "Applied after launchArgs, so it overrides the entry launchArgs just recorded.",
+          ),
         coreCount: z.number().int().min(0).optional().describe("Parallel build jobs; 0 = let the generator decide."),
+        visualStudio: z
+          .enum(["auto", "2019", "2022", "2026"])
+          .optional()
+          .describe("Windows only. 'auto' = newest Visual Studio with C++ tools; a year pins that Visual Studio."),
         cmakeFlags: z
           .record(z.string(), z.string().nullable())
           .optional()
@@ -551,8 +730,18 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         return { content: [txt(`Not changed: ${(err as Error).message}`)], isError: true };
       }
       const snap = configSnapshot(opts.buildOptions);
+      if (applied.length) {
+        log().info(
+          `MCP o3de_set_config: ${applied.join(", ")} -> config=${snap.config}, runTarget=${snap.runTarget}, targets=[${snap.targets.join(", ") || "all"}]`,
+        );
+      }
       const pending = snap.cmakeFlags?.pending ? " CMake flags aren't applied yet — run o3de_configure for them to take effect." : "";
-      const line = applied.length ? `Updated: ${applied.join(", ")}.${pending}` : "No changes — no fields provided.";
+      const vs = snap.visualStudio;
+      const overridden =
+        args.visualStudio !== undefined && vs && vs.preference !== args.visualStudio
+          ? ` Visual Studio '${args.visualStudio}' was saved to the user settings, but the ${vs.overriddenBy} value of o3de.build.visualStudio overrides it: '${vs.preference}' is in force.`
+          : "";
+      const line = applied.length ? `Updated: ${applied.join(", ")}.${pending}${overridden}` : "No changes — no fields provided.";
       return { content: [txt(line), txt(JSON.stringify(snap, null, 2))] };
     },
   );
@@ -574,6 +763,46 @@ function buildMcpServer(opts: McpHttpOptions): McpServer {
         ? `${list.targets.length} target(s) for ${list.config}`
         : list.note ?? "not configured";
       return { content: [txt(line), txt(JSON.stringify(list, null, 2))] };
+    },
+  );
+
+  // ---- Visual Studio: status -------------------------------------------------
+  server.registerTool(
+    "o3de_visual_studio_status",
+    {
+      title: "O3DE Visual Studio Status",
+      description:
+        "Report which Visual Studio (MSVC) configure, build and the O3DE Developer terminal use — the dashboard's " +
+        "Visual Studio row and the onboarding row, from the same code. Returns the selection preference " +
+        "(o3de.build.visualStudio: 'auto' = the newest install with C++ tools, or a pinned year), every detected install " +
+        "(displayName, version, year, installationPath, hasCppTools, selected), the selected one, and a problem when the " +
+        "selection is unusable (a pinned year that is not installed, or no C++ tools). invalidSetting appears when the " +
+        "setting holds something that is not auto or a pinnable year: it is ignored and read as auto. configuredWith shows the compiler the " +
+        "project's build tree cached and whether it lies outside the selected install (mismatch:true = the build tree was " +
+        "configured with a different Visual Studio; it keeps that compiler until CMakeCache.txt and CMakeFiles are deleted and " +
+        "o3de_configure runs). inheritedEnvironment appears when VS Code itself was started from a Visual Studio developer " +
+        "prompt; those variables are ignored only while a year is pinned. captureEnvironment:true also runs vcvars (1-2 s) and " +
+        "returns the VCToolsVersion, VCToolsInstallDir, VSINSTALLDIR and cl.exe path a build receives — the O3DE: Open " +
+        "Developer Terminal command and the \"O3DE Developer (MSVC)\" terminal profile start with exactly this " +
+        "environment (there is no tool to open a terminal: it is a GUI affordance an assistant cannot type into, so " +
+        "this reports what it gets, and o3de_build / o3de_configure run with the same environment). Change the " +
+        "selection with o3de_set_config visualStudio. Windows only (supported:false elsewhere).",
+      inputSchema: {
+        captureEnvironment: z
+          .boolean()
+          .optional()
+          .describe("Also capture the MSVC environment a build receives (runs vcvars, 1-2 s). Default false."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async (args: { captureEnvironment?: boolean }) => {
+      const status = await visualStudioStatus({ captureEnvironment: args.captureEnvironment });
+      const line = !status.supported
+        ? status.problem ?? "Visual Studio selection is Windows-only."
+        : `Visual Studio: ${status.selected ? status.selected.displayName : "none selected"} (preference ${status.preference})` +
+          (status.problem ? ` — ${status.problem}` : "") +
+          (status.configuredWith?.mismatch ? " — the build tree was configured with a different Visual Studio." : "");
+      return { content: [txt(line), txt(JSON.stringify(status, null, 2))] };
     },
   );
 
@@ -669,29 +898,105 @@ interface WaitableJob {
   done: Promise<unknown>;
 }
 
+/** The progress count of ONE tool call. Every phase of the call shares it: MCP progress must increase across the call. */
+interface ProgressCounter {
+  step: number;
+}
+
 /**
  * Hold a tool call open until the job finishes. With a client progress token, up to MAX_BLOCK_MS, sending a progress
- * heartbeat every HEARTBEAT_MS (resets the client's timeout, keeps proxies from idling out the stream). Without one,
- * only INLINE_WAIT_MS — the caller then hands back an id to poll. Returns as soon as the job finishes.
+ * heartbeat every `heartbeatMs` (resets the client's timeout, keeps proxies from idling out the stream). Without one,
+ * only INLINE_WAIT_MS — the caller then hands back an id to poll. Returns as soon as the job finishes. Exported for
+ * the progress test, which shortens the heartbeat.
  */
-async function holdUntilDone(extra: CallExtra, job: WaitableJob, progressMessage: (elapsedSeconds: number) => string): Promise<void> {
+export async function holdUntilDone(
+  extra: CallExtra,
+  job: WaitableJob,
+  progressMessage: (elapsedSeconds: number) => string,
+  progress: ProgressCounter = { step: 0 },
+  heartbeatMs = HEARTBEAT_MS,
+): Promise<void> {
   const progressToken = extra?._meta?.progressToken;
   const maxWaitMs = progressToken !== undefined ? MAX_BLOCK_MS : INLINE_WAIT_MS;
   const isDone = (): boolean => job.result !== undefined;
   const started = Date.now();
-  let step = 0;
   while (!isDone() && Date.now() - started < maxWaitMs && !extra?.signal?.aborted) {
-    await Promise.race([delay(progressToken !== undefined ? HEARTBEAT_MS : 500), job.done]);
+    await Promise.race([delay(progressToken !== undefined ? heartbeatMs : 500), job.done]);
     if (progressToken !== undefined && !isDone()) {
-      step += 1;
-      await extra
-        .sendNotification({
-          method: "notifications/progress",
-          params: { progressToken, progress: step, message: progressMessage(Math.round((Date.now() - job.startedAt) / 1000)) },
-        })
-        .catch(() => undefined); // client not listening — ignore
+      progress.step += 1;
+      await sendProgress(extra, progress.step, progressMessage(Math.round((Date.now() - job.startedAt) / 1000)));
     }
   }
+}
+
+/** Send one progress notification if the client gave a progress token (otherwise nothing). */
+async function sendProgress(extra: CallExtra, step: number, message: string): Promise<void> {
+  const progressToken = extra?._meta?.progressToken;
+  if (progressToken === undefined) {
+    return;
+  }
+  await extra
+    .sendNotification({ method: "notifications/progress", params: { progressToken, progress: step, message } })
+    .catch(() => undefined); // client not listening — ignore
+}
+
+/**
+ * o3de_build waitForEditorExit: wait for the Editor/ScriptCanvas to close before the build job starts. Returns
+ * undefined when it is clear (build now), or the reason to refuse instead (timed out, cancelled, or out of time
+ * without a progress token). A client with a progress token gets a heartbeat every `heartbeatMs` and the full
+ * maxWaitMinutes; one without gets only INLINE_WAIT_MS, like holdUntilDone. Exported for the progress test, which
+ * injects the process probe and shortens the heartbeat.
+ */
+export async function waitForEditorExit(
+  extra: CallExtra,
+  maxWaitMinutes: number,
+  progress: ProgressCounter,
+  probe: () => Promise<string[]> = runningGuardedProcesses,
+  heartbeatMs = HEARTBEAT_MS,
+): Promise<string | undefined> {
+  const canStream = extra?._meta?.progressToken !== undefined;
+  const outcome = await waitForProcessesToExit({
+    probe,
+    pollMs: heartbeatMs,
+    maxWaitMs: canStream ? maxWaitMinutes * 60_000 : INLINE_WAIT_MS,
+    signal: extra?.signal,
+    onWaiting: (running, elapsedMs) => {
+      if (running.length > 0) {
+        progress.step += 1;
+        void sendProgress(extra, progress.step, describeWait(running, elapsedMs));
+      }
+    },
+  });
+
+  const what = outcome.running.join(" and ") || "the Editor";
+  if (outcome.status === "cancelled") {
+    return `Stopped waiting for ${what} to close — no build was started.`;
+  }
+  if (outcome.status === "timeout") {
+    return canStream
+      ? `Gave up after ${maxWaitMinutes} min waiting for ${what} to close.`
+      : `${what} is still running after ${Math.round(outcome.waitedMs / 1000)}s. This client sent no progress token, ` +
+          `so the call cannot wait longer; a progress-capable client can wait up to ${maxWaitMinutes} min ` +
+          `(maxWaitMinutes). Ask the user to close it, then call o3de_build again.`;
+  }
+  return undefined;
+}
+
+/** The blocked:editor-running result for a build that was never started (no cmake, no job, nothing persisted). */
+function editorRunningResult(config: string, targets: string[], summary: string): BuildResult {
+  return {
+    ok: false,
+    exitCode: null,
+    durationMs: 0,
+    command: "",
+    targets,
+    config,
+    errors: [],
+    warnings: [],
+    summary,
+    rawTail: "",
+    blocked: "editor-running",
+  };
 }
 
 /** Shape a finished ConfigureResult into the tool response (summary line + full JSON). */
@@ -701,6 +1006,22 @@ function configureResultContent(result: ConfigureResult): { content: { type: "te
     content: [txt(headline), txt(JSON.stringify(result, null, 2))],
     isError: result.blocked !== undefined, // a configure that ran and failed is a valid result (errors listed)
   };
+}
+
+/** The one-line summary of an o3de_read_run_log call. */
+function runLogSummary(report: RunLogReport): string {
+  const tail = report.log;
+  if (!tail) {
+    return report.note ?? "No log to read.";
+  }
+  const name = basename(tail.path);
+  if (tail.readError) {
+    return `Could not read ${name}: ${tail.readError}`;
+  }
+  if (!tail.exists) {
+    return `${name} not found for ${report.project?.name} — has the app run yet?`;
+  }
+  return `${name}: last ${tail.lines} lines, written ${tail.ageSeconds}s ago${tail.truncated ? " (truncated)" : ""}.`;
 }
 
 /** A text content block (keeps the tool handlers terse). */

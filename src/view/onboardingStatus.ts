@@ -14,7 +14,8 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import { findVisualStudioInstalls, pickBestInstall } from "../env/visualStudio";
+import { findVisualStudioInstalls } from "../env/visualStudio";
+import { describeVsSelection, selectInstall } from "../env/visualStudioPreference";
 import { findNinja } from "../build/ninja";
 import { readProject, readEngine } from "../o3de/identity";
 
@@ -86,11 +87,13 @@ export class OnboardingStatus {
   // ---- Refresh (re-detect the prerequisites, update the cache) -------------
   /** Silently re-detect Visual Studio + Ninja; fires onDidChange only if something changed. */
   async refresh(): Promise<void> {
-    const best = pickBestInstall(await findVisualStudioInstalls());
+    const shown = describeVsSelection();
+    const best = selectInstall(await findVisualStudioInstalls()); // the install o3de.build.visualStudio selects
     const vs = best !== undefined && best.hasCppTools;
     const ninja = (await findNinja()) !== undefined;
 
-    let dirty = false;
+    // The dashboard's Visual Studio row reads what detection last saw, so a new answer repaints it too.
+    let dirty = describeVsSelection() !== shown;
     if (vs !== this.vs) {
       this.vs = vs;
       await this.state.update(KEY_VS, vs);

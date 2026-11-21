@@ -26,7 +26,7 @@ import { readCmakeFlags } from "./configureArgs";
 import { buildJobKey, configureJobKey } from "./jobKeys";
 import { runManagedCommand, describeResult, cancelManagedCommand, managedJob } from "./managedCommand";
 import { ensureNinja } from "./ninjaGuard";
-import { resolveBuildEnvironment } from "./toolchain";
+import { resolveBuildEnvironment, warnIfCompilerMismatch } from "./toolchain";
 import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 import { readManifest } from "../o3de/manifest";
 import { O3deProject } from "../o3de/identity";
@@ -37,6 +37,7 @@ import {
   formatCommand,
   parseCachedGenerator,
   projectBuildDir,
+  resolveThirdPartyPath,
   FILE_API_REQUESTS,
 } from "./configureCommand";
 
@@ -183,19 +184,20 @@ async function runConfigure(params: HeadlessConfigureParams): Promise<ConfigureR
   }
 
   // Toolchain prerequisites: the compiler environment (Windows MSVC / Linux gcc-clang) always; Ninja for the Ninja generator.
-  const toolchain = await resolveBuildEnvironment(params.compiler);
+  const toolchain = await resolveBuildEnvironment(params.compiler, { quiet: params.interactive !== true });
   if (!toolchain.ok) {
     log().error(`Configure aborted — ${toolchain.reason}`);
     return blocked("no-toolchain", toolchain.reason ?? "Could not establish the compiler environment.", project);
   }
+  warnIfCompilerMismatch(buildDir, toolchain); // the tree keeps its cached compiler, whichever Visual Studio is selected now
   if (params.generator === "Ninja Multi-Config" && !(await ensureNinja({ interactive: params.interactive === true }))) {
     log().error("Configure aborted — Ninja generator selected but Ninja is not installed.");
     return blocked("no-ninja", "The Ninja generator is selected but Ninja isn't installed.", project);
   }
 
-  // LY_3RDPARTY_PATH from the manifest — same source as the generated settings.json.
-  const manifest = readManifest();
-  const thirdPartyPath = manifest?.defaultThirdPartyFolder ?? path.join(os.homedir(), ".o3de", "3rdParty");
+  // LY_3RDPARTY_PATH: the Advanced tab's value, else the manifest's — same resolver as the generated settings.json.
+  const flags = readCmakeFlags(project.path);
+  const thirdParty = resolveThirdPartyPath(readManifest()?.defaultThirdPartyFolder, flags, os.homedir());
 
   // Request a File API reply so this configure yields the IntelliSense data
   // layer's source (and the reply the Build step's guard reads back).
@@ -209,14 +211,15 @@ async function runConfigure(params: HeadlessConfigureParams): Promise<ConfigureR
     projectPath: project.path,
     buildDir,
     generator: params.generator,
-    thirdPartyPath,
+    thirdPartyPath: thirdParty.path,
     compiler: params.compiler,
-    extraCacheArgs: readCmakeFlags(project.path),
+    extraCacheArgs: flags,
   });
   const command = formatCommand(argv);
 
   const label = `Configure ${project.projectName}`;
   log().info(`Configuring ${project.projectName} → ${buildDir}`);
+  log().info(`  3rd-party path: ${thirdParty.path} (${thirdParty.source})`);
   log().info(`  ${command} (streaming to “O3DE Build Output”)`);
 
   const run = await runManagedCommand({

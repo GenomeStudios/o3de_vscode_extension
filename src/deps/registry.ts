@@ -124,8 +124,8 @@ export const CHECKS: DependencyCheck[] = [
   },
   {
     id: "visualStudio",
-    label: "Visual Studio 2022 (MSVC)",
-    what: "The default Windows C++ compiler + Windows SDK. Install the 'Desktop development with C++' workload.",
+    label: "Visual Studio (MSVC)",
+    what: "The Windows C++ compiler + Windows SDK, from Visual Studio 2022 or newer. Install the 'Desktop development with C++' workload. With several installed, choose which one O3DE uses with 'O3DE: Select Visual Studio Version' (the detail shows the selection).",
     category: "toolchain",
     tier: "required",
     track: "cpp",

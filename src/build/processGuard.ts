@@ -11,6 +11,7 @@ import * as vscode from "vscode";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { log } from "../log";
+import { tasklistListsImage } from "./processProbe";
 
 const execAsync = promisify(exec);
 
@@ -18,14 +19,12 @@ const execAsync = promisify(exec);
 const GUARDED_PROCESSES = ["Editor.exe", "ScriptCanvasApplication.exe"];
 
 // ---- Windows process probing -----------------------------------------------
-async function isRunning(imageName: string): Promise<boolean> {
-  try {
-    const { stdout } = await execAsync(`tasklist /FI "IMAGENAME eq ${imageName}" /NH`);
-    // When nothing matches, tasklist prints an INFO line (no image name) → false.
-    return stdout.toLowerCase().includes(imageName.toLowerCase());
-  } catch {
-    return false; // tasklist unavailable → don't block the build
-  }
+/**
+ * The guarded images listed in `tasklist /FO CSV` output. CSV keeps full image names; the default table cuts them
+ * at 25 characters, which hid the 27-character ScriptCanvasApplication.exe.
+ */
+export function guardedImagesListed(stdout: string): string[] {
+  return GUARDED_PROCESSES.filter((image) => tasklistListsImage(stdout, image));
 }
 
 async function killProcess(imageName: string): Promise<void> {
@@ -43,13 +42,12 @@ export async function runningGuardedProcesses(): Promise<string[]> {
   if (process.platform !== "win32") {
     return [];
   }
-  const running: string[] = [];
-  for (const image of GUARDED_PROCESSES) {
-    if (await isRunning(image)) {
-      running.push(image);
-    }
+  try {
+    const { stdout } = await execAsync("tasklist /NH /FO CSV");
+    return guardedImagesListed(stdout);
+  } catch {
+    return []; // tasklist unavailable → don't block the build
   }
-  return running;
 }
 
 // ---- Guard -----------------------------------------------------------------

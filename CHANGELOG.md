@@ -20,15 +20,141 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     its value, what the CMake cache holds, and whether it has been applied, plus whether a configure
     is needed.
   - **`o3de_set_config`** can now change the core count and the CMake flags. A value sets a flag;
-    an empty value removes it.
+    an empty value removes it. A request it refuses (an invalid flag name, or flags with no
+    project) changes nothing, including its other fields.
+- **Launch Options remembers what you used before** (#39). The last 10 launch options are kept per
+  workspace, most recent first. Once there is a history, clicking **Launch Options** opens a list
+  of the recent values to switch back to, with **Type new arguments…**, **Clear launch options**
+  and **Remove entries from history…**. Clearing the options keeps the old value in the list.
+  With no history yet it is still the plain input box. Over MCP, **`o3de_get_config`** now returns
+  `launchArgsHistory`, **`o3de_set_config`** records every `launchArgs` change into it, and can
+  replace it with `launchArgsHistory` (an empty list forgets everything).
+- **MCP can run the Editor under the debugger** (#44). The new **`o3de_run_debug`** tool starts the
+  run target (or the `target` and `config` you pass) under VS Code's C++ debugger. It uses the same
+  debug setup as the dashboard's **Run in Debug**, so the user's breakpoints hit. It needs the
+  Microsoft C/C++ extension, which is only available in Microsoft's VS Code build (not VSCodium,
+  Open VSX editors or Cursor). Without it the tool answers `no-debugger` and never installs
+  anything. It never prompts: a missing build, a running build, no project, or the same exe
+  already running each come back as a `blocked` reason, and a running exe is left alone. The
+  debuggee's output goes to VS Code's terminal, so an assistant reads its logs with
+  `o3de_read_run_log`. Stopping the session stays with the Debug toolbar.
+- **MCP can read the app's logs and check that a launch survived** (#43). The new
+  **`o3de_read_run_log`** tool returns the last lines of the project's `Editor.log`, `Game.log` or
+  `error.log`. `log` picks one; the default reads the log of the selected run target. `tailLines`
+  sets how many lines (default 100, at most 500), and the reply is also capped at about 48,000
+  characters, keeping the newest. It works while the app is still running, and it says when the log
+  was last written so an assistant can tell whether it belongs to the current run. **`o3de_run`**
+  now takes an optional `settleSeconds` (up to 30). After a successful launch it waits that long
+  for the app to exit, then reports whether it is still running, how long it waited, and the tail
+  of its log (marked `stale` when the log was last written before the launch). It also returns
+  the tail of `error.log` when that file was written since the launch: a crashed Editor can stay
+  open on its crash dialog, so "still running" alone does not mean the launch survived. Without
+  `settleSeconds` it still returns at once. There is no exit code: the app is launched detached
+  and its output is not captured, so the logs are the evidence.
+- **Choose which Visual Studio builds use** (#38). Until now every Configure, Build and Developer
+  terminal used the newest Visual Studio installed, so installing a new version silently moved
+  your builds to it. The new **`o3de.build.visualStudio`** setting is `auto` (the default, which
+  behaves exactly as before: the newest install that has the C++ tools) or a year, `2019`, `2022`
+  or `2026`, which pins that version. A newly installed Visual Studio then never takes over.
+  - **A Visual Studio row on the dashboard** (Windows, in Build Options right after Compiler)
+    shows the choice and what it resolves to, such as `Auto -> Visual Studio Community 2026` or
+    `2022 -> Visual Studio Community 2022`. Click it, or run **O3DE: Select Visual Studio
+    Version**, to pick from the installs found on your machine. The choice is saved to your user
+    settings, not the project's. If a workspace or folder value of the setting overrides it, the
+    command tells you.
+  - **The Requirements row names the choice**, such as `Visual Studio Community 2022 (pinned 2022)`
+    or `... (auto: newest)`. A pinned year that is not installed shows the row red and says what
+    was found instead. Configure and Build then stop with that reason rather than quietly using a
+    different Visual Studio.
+  - **A pin is honoured even if VS Code was started from a Visual Studio developer prompt.** Such
+    a prompt would otherwise decide the compiler no matter what was selected, because the
+    environment script keeps the first Visual Studio it finds. Only while a year is pinned, and only
+    when VS Code really did inherit a developer prompt, those inherited variables are cleared before
+    the environment is captured. Your own `INCLUDE`, `LIB` and similar variables are not touched
+    when there is no such prompt. With `auto` nothing changes.
+  - **A setting that is not a valid value is no longer silent.** If `o3de.build.visualStudio` holds
+    something other than `auto`, `2019`, `2022` or `2026` (an unquoted `2022`, say, or `"2025"`), it
+    is ignored and builds use the newest Visual Studio, exactly like `auto`. The log now says so
+    once, and the dashboard's Visual Studio row reads `Auto (invalid setting "2025")`.
+  - **A build tree that was configured with a different Visual Studio is now reported.** CMake keeps
+    the compiler it found at the first configure, so a tree built under one Visual Studio keeps
+    using it after the selection changes. When the cached compiler is outside the selected
+    install, Configure and Build print one warning in the O3DE Build Output channel and the log,
+    naming both. Nothing is blocked or cleared: to switch an existing tree, delete
+    `build/windows/CMakeCache.txt` and `CMakeFiles`, then Configure. The `Visual Studio 17 2022`
+    CMake generator always uses a Visual Studio 2022 instance, whatever is selected.
+  - **MCP.** **`o3de_get_config`** returns a `visualStudio` section (the preference, what it
+    resolves to, and the choices) and **`o3de_set_config`** accepts `visualStudio` (`auto`, `2019`,
+    `2022` or `2026`). It is an error off Windows, and the result says when a workspace value
+    overrides what was saved. The new read-only **`o3de_visual_studio_status`** lists the installs,
+    which one is selected and why not when none is, whether the project's build tree was
+    configured with a different one, whether VS Code inherited developer-prompt variables, and an
+    `invalidSetting` when the setting holds a value that is not valid.
+    With `captureEnvironment` it also returns the `VCToolsVersion`, install folder and `cl.exe` a
+    build receives, which is the same environment the Developer terminal uses.
+  - **The Environment Report lists the Visual Studio selection** in its build selections.
+- **A terminal profile that follows the Visual Studio selection** (#42). Pick **O3DE Developer
+  (MSVC)** from the terminal dropdown to get a terminal with the selected Visual Studio's
+  environment (`cl`, `cmake` and `ninja` work at once). Run **Terminal: Select Default Profile** and
+  choose it to make every new terminal start that way. Opening one takes a second or two while the
+  environment is captured, and it follows `o3de.build.visualStudio`, the same as Configure and
+  Build. The profile starts `cmd.exe` itself, so it works as your default profile. **O3DE: Open
+  Developer Terminal** still opens your default shell, now with the selected Visual Studio's
+  environment applied. A terminal profile of your own that runs a fixed `vcvars64.bat` cannot
+  override that environment: once it is set, a second `vcvars64.bat` does nothing. If the selected
+  Visual Studio cannot be used (a pinned year that is not installed on this machine, for instance),
+  the profile opens a plain terminal named **O3DE Developer (no MSVC env)** and says why, instead of
+  failing, so making it your default never leaves you without a terminal. The profile exists on
+  every system, but it only works on Windows. Terminal profiles you wrote yourself in
+  `settings.json` (such as a "Developer Command Prompt for VS 2022" profile) and CMake Tools compiler
+  pins (`cmake.configureSettings` compiler paths) stay exactly as you wrote them, and they still
+  affect everything that uses them. Remove them to stop them overriding the selection.
+  **`o3de_visual_studio_status`** with `captureEnvironment` reports
+  the environment both the profile and **O3DE: Open Developer Terminal** receive. There is no MCP
+  tool to open a terminal, because an assistant cannot type into one.
+- **Build When Editor Closes** (#33). The new **O3DE: Build When Editor Closes** command is a
+  catch-all: with no Editor open it builds at once, and with the Editor (or Script Canvas) open it
+  waits and starts the normal build when you close it. The wait is a notification that counts the
+  time and has a **Cancel** button, which stops waiting and builds nothing. The build that follows
+  is the ordinary one, so its checks and the Stop button work as usual. While it waits, the
+  dashboard looks idle, and starting the command again says it is already waiting. If a build is
+  already running, with or without an Editor open, it says so and does nothing, rather than
+  joining that build and reporting its result a second time. It does
+  not close the Editor for you, so unsaved work is never lost. Over MCP, **`o3de_build`** takes
+  `waitForEditorExit` (and `maxWaitMinutes`, 1 to 60, default 30). It waits for the Editor to close
+  and then builds, instead of returning `blocked: editor-running`. A client that sends progress
+  tokens gets a heartbeat every 5 seconds for the whole wait; one that does not waits only about 20
+  seconds. If the Editor is still open then, the call returns `blocked: editor-running` saying so.
+  Cancelling the call stops the wait without building. On Linux an open Editor does not block a
+  build, so the command and the option simply build.
 
 ### Changed
 
+- **`o3de_set_config` now logs what it changed** (#41). Each change made through the MCP endpoint
+  adds one line to the O3DE Development Tools output channel, such as
+  `MCP o3de_set_config: config -> config=debug, runTarget=Editor, targets=[all]`. Before, nothing
+  recorded that it had run.
 - **Configure no longer starts while a build is running for the project.** Both write the same
   build tree. Stop the build or wait for it to finish, then configure.
+- **The installed extension no longer includes internal development files.** `CLAUDE.md`,
+  `PUBLISHING.md` and `publish.bat` were packaged with the extension by mistake.
+- **Configure, Build and the Developer terminal no longer wait on a Visual Studio alert** (#38). The
+  "no Visual Studio" and "no C++ workload" notifications used to hold the caller until you
+  dismissed them, which could leave an MCP **`o3de_configure`** or **`o3de_build`** waiting on a
+  notification nobody would see. Over MCP they now only log, and the reason comes back in the
+  blocked result. From the dashboard the notification still appears, but the action no longer
+  waits for it.
 
 ### Fixed
 
+- **The dashboard no longer snaps back to the original selections after you switch panes** (#41).
+  After changing Config, Run Target or Launch Options and switching to another sidebar pane (such
+  as Run and Debug) and back, every row showed the values from when the dashboard first opened.
+  The same happened to which sections were open or closed, and to the Build and Stop buttons and
+  the progress bar during a build. The dashboard now asks for the current state whenever it
+  reloads or is shown again, so it always matches what Build and Run will use. The Run and Debug
+  launch entries (`launch.json`) are not part of this fix: they are still written only by
+  **O3DE: Write Workspace Settings**.
 - **Builds and configures now say how they ended, in the O3DE Build Output channel.** Previously the
   output simply stopped. The outcome appeared only in a notification that disappears, and in the
   separate O3DE Development Tools log. Now every build, configure and Class Wizard run ends its
@@ -42,6 +168,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     Ninja is missing.
   - **A process that couldn't be launched at all** now shows its error in the channel. Before, it
     wasn't shown anywhere.
+- **The Visual Studio row no longer says 2022 on every machine** (#37). The C++ Requirements row and
+  the Environment Report now read "Visual Studio (MSVC)". The row's detail line still names the
+  exact install it found, such as Visual Studio Community 2026.
+- **A custom 3rd-party path is now passed once, and kept** (#36). When the Advanced tab sets
+  `LY_3RDPARTY_PATH`, Configure now passes that value on its own. Before, it also passed the O3DE
+  default path first, so the command line showed two. Write Workspace Settings and the setup wizard
+  also keep your custom path in `cmake.configureSettings` instead of replacing it with the default.
+  A blank `LY_3RDPARTY_PATH` flag is ignored and no longer empties the path. The O3DE log now shows
+  the path Configure uses and where it came from.
+- **The 3rd Party path row and the Environment Report now follow the Advanced tab** (#36). With a
+  custom `LY_3RDPARTY_PATH` set, both showed the O3DE manifest's folder, so the row could read
+  "missing" for a path Configure wasn't using. They now show the path Configure uses and where it
+  came from.
+- **The running check now recognises a GameLauncher with a long project name** (#44). On Windows the
+  process list cuts image names at 25 characters, so `<Project>.GameLauncher.exe` was missed
+  whenever the project name had 9 or more characters. The Run and Stop buttons, `o3de_is_running`
+  and `o3de_run_debug` now read the full name. On Linux the check no longer counts every process
+  that has the app's name anywhere in its command line, or its own helper shell. `o3de_run_debug`
+  matches the exe's full path at the start of the command line. It also refuses a second start
+  while the first is still starting, instead of launching two debugged copies.
+- **The Build guard now also notices an open Script Canvas** (#33). Windows cuts image names at 25
+  characters in its process list, so `ScriptCanvasApplication.exe` (27) was never seen, and only an
+  open Editor stopped a build. The guard now reads the full names, so an open Script Canvas gets
+  the same warning, and **`o3de_build`** reports it as `blocked: editor-running`.
 
 ## [0.4.1] — 2026-09-23
 

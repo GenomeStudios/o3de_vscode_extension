@@ -7,6 +7,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
+import { pushLaunchArgsHistory, sanitizeLaunchArgsHistory } from "./launchArgsHistory";
 
 export type Generator = "Ninja Multi-Config" | "Visual Studio 17 2022";
 export type BuildConfig = "profile" | "debug" | "release";
@@ -48,6 +49,7 @@ const KEY_TARGETS = "o3de.build.targets";
 const KEY_CORE_COUNT = "o3de.build.coreCount";
 const KEY_RUN_TARGET = "o3de.run.target";
 const KEY_LAUNCH_ARGS = "o3de.run.launchArgs";
+const KEY_LAUNCH_ARGS_HISTORY = "o3de.run.launchArgsHistory";
 
 export class BuildOptions {
   private readonly changed = new vscode.EventEmitter<void>();
@@ -95,6 +97,11 @@ export class BuildOptions {
     return this.state.get<string>(KEY_LAUNCH_ARGS) ?? "";
   }
 
+  /** The launch args remembered for this workspace, most recent first (see launchArgsHistory.ts). */
+  get launchArgsHistory(): string[] {
+    return sanitizeLaunchArgsHistory(this.state.get<unknown>(KEY_LAUNCH_ARGS_HISTORY));
+  }
+
   async setGenerator(value: Generator): Promise<void> {
     await this.state.update(KEY_GENERATOR, value);
     this.changed.fire();
@@ -127,8 +134,26 @@ export class BuildOptions {
     this.changed.fire();
   }
 
+  /**
+   * Set the launch args (trimmed; blank clears) and remember them in the history.
+   * The new value goes to the top, so a cleared value stays recoverable and switching back and forth
+   * between two sets keeps both at the top. The OLD value is recorded only when no history was ever
+   * stored (args set before the history existed are kept the first time they change): once there is a
+   * history, an entry the user removed or replaced is never brought back.
+   */
   async setLaunchArgs(value: string): Promise<void> {
-    await this.state.update(KEY_LAUNCH_ARGS, value);
+    const args = value.trim();
+    const neverStored = this.state.get<unknown>(KEY_LAUNCH_ARGS_HISTORY) === undefined;
+    const base = neverStored ? pushLaunchArgsHistory([], this.launchArgs) : this.launchArgsHistory;
+    const history = pushLaunchArgsHistory(base, args);
+    await this.state.update(KEY_LAUNCH_ARGS_HISTORY, history);
+    await this.state.update(KEY_LAUNCH_ARGS, args);
+    this.changed.fire();
+  }
+
+  /** Replace the remembered launch args (cleaned and capped); [] forgets them all. */
+  async setLaunchArgsHistory(value: string[]): Promise<void> {
+    await this.state.update(KEY_LAUNCH_ARGS_HISTORY, sanitizeLaunchArgsHistory(value));
     this.changed.fire();
   }
 

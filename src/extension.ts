@@ -14,7 +14,8 @@ import { initLog, log } from "./log";
 import { setWorkspaceEngineRoots } from "./o3de/discovery";
 import { workspaceEngineRoots } from "./build/workspaceFolders";
 import { ensureVisualStudio } from "./env/visualStudioGuard";
-import { openDeveloperTerminal } from "./env/developerTerminal";
+import { openDeveloperTerminal, registerDeveloperTerminalProfile } from "./env/developerTerminal";
+import { selectVisualStudio } from "./env/selectVisualStudio";
 import { ensureNinja } from "./build/ninjaGuard";
 import { DashboardViewProvider } from "./view/dashboardView";
 import { OnboardingStatus } from "./view/onboardingStatus";
@@ -30,9 +31,10 @@ import {
 } from "./workspace/projectScope";
 import { writeProjectConfig } from "./build/writeProjectConfig";
 import { configureProject, stopConfigure } from "./build/configure";
-import { buildProject, stopBuild } from "./build/build";
+import { buildProject, buildWhenEditorCloses, stopBuild } from "./build/build";
 import { selectTargets } from "./build/selectTargets";
 import { selectRunTarget } from "./build/selectRunTarget";
+import { selectLaunchArgs } from "./build/selectLaunchArgs";
 import { customRunImage } from "./build/runCommand";
 import { runProject, stopRun } from "./build/run";
 import { forceCloseRuntime } from "./build/runQuery";
@@ -185,6 +187,11 @@ export function activate(context: vscode.ExtensionContext): void {
     if (e.affectsConfiguration("o3de.enabled")) {
       applyEnablement(); // start/stop the runtime as the project is opted in/out
     }
+    if (e.affectsConfiguration("o3de.build.visualStudio")) {
+      void deps.refresh(); // the onboarding row's detail names the selected Visual Studio
+      onboarding.notifyChanged(); // repaint the dashboard's Visual Studio row now (it reads the setting live) ...
+      void onboarding.refresh(); // ... and again if re-detection changes what it resolves to
+    }
     if (
       e.affectsConfiguration("o3de.llm.enabled") ||
       e.affectsConfiguration("o3de.llm.port") ||
@@ -327,10 +334,19 @@ export function activate(context: vscode.ExtensionContext): void {
     void onboarding.refresh();
   });
 
+  // Command: "O3DE: Select Visual Studio Version" — pick which Visual Studio the MSVC environment comes from.
+  const selectVs = vscode.commands.registerCommand("o3de.selectVisualStudio", () => {
+    void selectVisualStudio();
+  });
+
   // Command: "O3DE: Open Developer Terminal" — a terminal with the MSVC env ready.
   const openTerm = vscode.commands.registerCommand("o3de.openDeveloperTerminal", () => {
     void openDeveloperTerminal();
   });
+
+  // Terminal profile: "O3DE Developer (MSVC)" in the terminal dropdown / "Terminal: Select Default Profile".
+  // Inert until picked, so it does not wake the extension's behavior in a non-O3DE workspace.
+  const terminalProfile = registerDeveloperTerminalProfile();
 
   // Command: "O3DE: Check Ninja" — detect Ninja, offer to install it if missing.
   const checkNinja = vscode.commands.registerCommand("o3de.checkNinja", async () => {
@@ -382,6 +398,12 @@ export function activate(context: vscode.ExtensionContext): void {
     } else {
       await buildProject(buildOptions);
     }
+  });
+
+  // Command: "O3DE: Build When Editor Closes" — the catch-all: builds now if no Editor is open,
+  // otherwise waits (cancellable notification) for it to close and then runs the normal build.
+  const buildWhenEditorClosesCmd = vscode.commands.registerCommand("o3de.buildWhenEditorCloses", async () => {
+    await buildWhenEditorCloses(buildOptions);
   });
 
   // Command: "O3DE: Stop Build" — cancel the running build + its process tree.
@@ -491,16 +513,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const selectRunTargetCmd = vscode.commands.registerCommand("o3de.selectRunTarget", () => {
     void selectRunTarget(buildOptions);
   });
-  const setLaunchArgs = vscode.commands.registerCommand("o3de.setLaunchArgs", async () => {
-    const value = await vscode.window.showInputBox({
-      title: "O3DE: Launch Options",
-      prompt: "Extra command-line args passed when running (blank to clear)",
-      placeHolder: "+LoadLevel DefaultLevel +r_displayInfo 1",
-      value: buildOptions.launchArgs,
-    });
-    if (value !== undefined) {
-      await buildOptions.setLaunchArgs(value.trim());
-    }
+  // The launch-options picker offers the recent values (a plain input box until there are some).
+  const setLaunchArgs = vscode.commands.registerCommand("o3de.setLaunchArgs", () => {
+    void selectLaunchArgs(buildOptions);
   });
   const setCoreCount = vscode.commands.registerCommand("o3de.setCoreCount", async () => {
     const value = await vscode.window.showInputBox({
@@ -623,7 +638,9 @@ export function activate(context: vscode.ExtensionContext): void {
     openSettings,
     copyEnvReport,
     checkVs,
+    selectVs,
     openTerm,
+    terminalProfile,
     checkNinja,
     setupWorkspace,
     addGems,
@@ -631,6 +648,7 @@ export function activate(context: vscode.ExtensionContext): void {
     configure,
     stopConfigureCmd,
     build,
+    buildWhenEditorClosesCmd,
     stopBuildCmd,
     run,
     runDebug,

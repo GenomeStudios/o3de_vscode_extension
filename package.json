@@ -56,6 +56,24 @@
           },
           "markdownDescription": "Extra CMake **cache variables** passed to **O3DE: Configure Project** as `-D<name>=<value>` (e.g. `LY_RENDERDOC_ENABLED: \"ON\"`, `CMAKE_OBJECT_PATH_MAX: \"1000\"`). Managed by the **Advanced** tab, but editable here. Changes apply on the next Configure (CMake caches them in `CMakeCache.txt`)."
         },
+        "o3de.build.visualStudio": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "2019",
+            "2022",
+            "2026"
+          ],
+          "enumDescriptions": [
+            "The newest installed Visual Studio that has the C++ tools (the default).",
+            "Pin Visual Studio 2019 (version 16).",
+            "Pin Visual Studio 2022 (version 17).",
+            "Pin Visual Studio 2026 (version 18)."
+          ],
+          "default": "auto",
+          "scope": "resource",
+          "markdownDescription": "Which **Visual Studio's MSVC environment** Configure, Build, the O3DE Developer terminal and the onboarding row use (Windows). **`auto`** (the default) is the newest Visual Studio installed with the C++ tools; a **year** pins that version, so a newly installed Visual Studio never takes over. An existing build tree keeps the compiler it was configured with: to switch it, delete `build/windows/CMakeCache.txt` and `build/windows/CMakeFiles`, then run **O3DE: Configure Project**. The `Visual Studio 17 2022` CMake generator always uses a Visual Studio 2022 instance, whatever is selected here. Pick it from the dashboard's **Visual Studio** row or **O3DE: Select Visual Studio Version**, which saves it to your user settings."
+        },
         "o3de.llm.enabled": {
           "type": "boolean",
           "default": false,
@@ -160,6 +178,10 @@
         "title": "O3DE: Check Visual Studio"
       },
       {
+        "command": "o3de.selectVisualStudio",
+        "title": "O3DE: Select Visual Studio Version"
+      },
+      {
         "command": "o3de.openDeveloperTerminal",
         "title": "O3DE: Open Developer Terminal",
         "icon": "$(terminal)"
@@ -201,6 +223,11 @@
         "command": "o3de.build",
         "title": "O3DE: Build",
         "icon": "$(tools)"
+      },
+      {
+        "command": "o3de.buildWhenEditorCloses",
+        "title": "O3DE: Build When Editor Closes",
+        "icon": "$(watch)"
       },
       {
         "command": "o3de.stopBuild",
@@ -380,6 +407,15 @@
         ]
       }
     ],
+    "terminal": {
+      "profiles": [
+        {
+          "id": "o3de.developerTerminal",
+          "title": "O3DE Developer (MSVC)",
+          "icon": "terminal"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "o3de.build",
@@ -393,6 +429,12 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "o3de.selectVisualStudio",
+          "when": "isWindows"
+        }
+      ],
       "editor/title/run": [
         {
           "command": "o3de.debugLuaFile",

@@ -29,7 +29,7 @@ function scrubbedEnvironment(): { name: string; value: string }[] {
 
 // The native C++ debug configuration for this OS: cppvsdbg on Windows, cppdbg
 // (gdb) on Linux. Both take the same program/args/cwd; the launcher fields differ.
-function nativeDebugConfig(name: string, program: string, args: string[], cwd: string): vscode.DebugConfiguration {
+export function nativeDebugConfig(name: string, program: string, args: string[], cwd: string): vscode.DebugConfiguration {
   const common = { request: "launch", name, program, args, cwd, environment: scrubbedEnvironment() };
   if (process.platform === "win32") {
     return { type: "cppvsdbg", ...common, console: "integratedTerminal" };

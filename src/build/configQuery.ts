@@ -17,6 +17,8 @@ import { fileApiReplyDir, projectBuildDir } from "./configureCommand";
 import { curatedTargets } from "./buildCommand";
 import { loadTargetNames, loadExecutableTargets } from "../intellisense/fileApi";
 import { isConfiguredFor } from "./configure";
+import { VS_PREFERENCES, VsPreference } from "../env/visualStudio";
+import { describeVsSelection, readVsPreference, vsPreferenceOverride, writeVsPreference } from "../env/visualStudioPreference";
 import {
   CmakeFlagsReport,
   applyCmakeFlagPatch,
@@ -45,10 +47,15 @@ export interface ConfigSnapshot {
   targets: string[]; // empty = build everything
   runTarget: RunTarget;
   launchArgs: string;
+  launchArgsHistory: string[]; // the remembered launch args, most recent first
   coreCount: number; // parallel build jobs; 0 = let the generator decide
   // The Advanced tab's extra CMake cache flags, each with whether the last configure applied it.
   // `pending` = a configure is needed for the stored flags to take effect.
   cmakeFlags?: CmakeFlagsReport;
+  // Windows only: which Visual Studio's MSVC environment configure/build use (o3de.build.visualStudio, a USER setting).
+  // `selection` is the last detection's answer ("Auto -> Visual Studio Community 2026"); `overriddenBy` is set when a
+  // workspace or folder value of the setting wins over the user's.
+  visualStudio?: { preference: VsPreference; selection: string; options: VsPreference[]; overriddenBy?: "workspace" | "folder" };
   // runTargets lists only the two always-valid values — any executable target
   // name (o3de_list_targets → executables) is also accepted as a runTarget.
   options: { generators: Generator[]; compilers: Compiler[]; configs: BuildConfig[]; runTargets: RunTarget[] };
@@ -65,8 +72,18 @@ export function configSnapshot(buildOptions: BuildOptions): ConfigSnapshot {
     targets: buildOptions.targets,
     runTarget: buildOptions.runTarget,
     launchArgs: buildOptions.launchArgs,
+    launchArgsHistory: buildOptions.launchArgsHistory,
     coreCount: buildOptions.coreCount,
     cmakeFlags: project ? readCmakeFlagsReport(project.path) : undefined,
+    visualStudio:
+      process.platform === "win32"
+        ? {
+            preference: readVsPreference(),
+            selection: describeVsSelection(),
+            options: VS_PREFERENCES,
+            overriddenBy: vsPreferenceOverride(),
+          }
+        : undefined,
     options: { generators: GENERATORS, compilers: COMPILERS, configs: BUILD_CONFIGS, runTargets: RUN_TARGETS },
     project: project
       ? {
@@ -86,13 +103,36 @@ export interface ConfigPatch {
   config?: BuildConfig;
   targets?: string[];
   runTarget?: RunTarget;
-  launchArgs?: string;
+  launchArgs?: string; // also recorded into the launch-args history
+  launchArgsHistory?: string[]; // replaces the remembered launch args; [] clears them
   coreCount?: number; // 0 = auto
   cmakeFlags?: Record<string, string | null>; // set a flag; "" or null removes it. Others are kept.
+  visualStudio?: VsPreference; // Windows only; written to the USER settings
 }
 
-/** Apply the provided fields (already schema-validated) and report which changed. */
+/**
+ * Apply the provided fields (already schema-validated) and report which changed. A patch that cannot be applied
+ * (invalid CMake flag names, CMake flags without a project, a Visual Studio selection off Windows) throws BEFORE
+ * anything is changed.
+ */
 export async function applyConfig(buildOptions: BuildOptions, patch: ConfigPatch): Promise<string[]> {
+  // These are the parts that can be refused, so check them before the first write.
+  if (patch.visualStudio !== undefined && process.platform !== "win32") {
+    throw new Error("Visual Studio selection is Windows-only.");
+  }
+  const flagPatch = patch.cmakeFlags !== undefined && Object.keys(patch.cmakeFlags).length > 0 ? patch.cmakeFlags : undefined;
+  let flagProject: O3deProject | undefined;
+  if (flagPatch) {
+    const invalid = invalidCmakeFlagNames(flagPatch);
+    if (invalid.length > 0) {
+      throw new Error(`Not valid CMake variable names: ${invalid.join(", ")}.`);
+    }
+    flagProject = firstProject();
+    if (!flagProject) {
+      throw new Error("No O3DE project in this workspace — CMake flags are stored per project.");
+    }
+  }
+
   const applied: string[] = [];
   if (patch.generator !== undefined) {
     await buildOptions.setGenerator(patch.generator);
@@ -118,20 +158,21 @@ export async function applyConfig(buildOptions: BuildOptions, patch: ConfigPatch
     await buildOptions.setLaunchArgs(patch.launchArgs);
     applied.push("launchArgs");
   }
+  if (patch.launchArgsHistory !== undefined) {
+    // After launchArgs on purpose: a patch carrying both ends with exactly this history.
+    await buildOptions.setLaunchArgsHistory(patch.launchArgsHistory);
+    applied.push("launchArgsHistory");
+  }
   if (patch.coreCount !== undefined) {
     await buildOptions.setCoreCount(patch.coreCount);
     applied.push("coreCount");
   }
-  if (patch.cmakeFlags !== undefined && Object.keys(patch.cmakeFlags).length > 0) {
-    const invalid = invalidCmakeFlagNames(patch.cmakeFlags);
-    if (invalid.length > 0) {
-      throw new Error(`Not valid CMake variable names: ${invalid.join(", ")}.`);
-    }
-    const project = firstProject();
-    if (!project) {
-      throw new Error("No O3DE project in this workspace — CMake flags are stored per project.");
-    }
-    await writeCmakeFlags(project.path, applyCmakeFlagPatch(readCmakeFlags(project.path), patch.cmakeFlags));
+  if (patch.visualStudio !== undefined) {
+    await writeVsPreference(patch.visualStudio);
+    applied.push("visualStudio");
+  }
+  if (flagPatch && flagProject) {
+    await writeCmakeFlags(flagProject.path, applyCmakeFlagPatch(readCmakeFlags(flagProject.path), flagPatch));
     applied.push("cmakeFlags");
   }
   return applied;

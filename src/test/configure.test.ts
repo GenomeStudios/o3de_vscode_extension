@@ -1,9 +1,11 @@
 import * as assert from "assert";
+import * as path from "path";
 import {
   buildConfigureArgs,
   formatCommand,
   parseCachedGenerator,
   readCachedValue,
+  resolveThirdPartyPath,
 } from "../build/configureCommand";
 
 suite("configureCommand", () => {
@@ -51,6 +53,62 @@ suite("configureCommand", () => {
     });
     assert.strictEqual(argv.includes("-DCMAKE_OBJECT_PATH_MAX=1000"), false);
     assert.strictEqual(argv[argv.length - 1], "-DLY_3RDPARTY_PATH=T");
+  });
+
+  test("a user LY_3RDPARTY_PATH replaces the default and is emitted once, in the default's slot", () => {
+    const argv = buildConfigureArgs({
+      projectPath: "P",
+      buildDir: "B",
+      generator: "Ninja Multi-Config",
+      thirdPartyPath: "T",
+      extraCacheArgs: { LY_3RDPARTY_PATH: "/custom", LY_RENDERDOC_ENABLED: "ON" },
+    });
+    assert.deepStrictEqual(
+      argv.filter((token) => token.startsWith("-DLY_3RDPARTY_PATH=")),
+      ["-DLY_3RDPARTY_PATH=/custom"],
+    );
+    assert.strictEqual(argv[argv.indexOf("-B") + 2], "-DLY_3RDPARTY_PATH=/custom");
+    assert.strictEqual(argv[argv.length - 1], "-DLY_RENDERDOC_ENABLED=ON");
+  });
+
+  test("an empty or whitespace user LY_3RDPARTY_PATH is dropped, never blanking the default", () => {
+    for (const blank of ["", "   "]) {
+      const argv = buildConfigureArgs({
+        projectPath: "P",
+        buildDir: "B",
+        generator: "Ninja Multi-Config",
+        thirdPartyPath: "T",
+        extraCacheArgs: { LY_3RDPARTY_PATH: blank },
+      });
+      assert.deepStrictEqual(
+        argv.filter((token) => token.startsWith("-DLY_3RDPARTY_PATH=")),
+        ["-DLY_3RDPARTY_PATH=T"],
+      );
+    }
+  });
+
+  test("resolveThirdPartyPath: the Advanced flag beats the manifest, which beats the home default", () => {
+    const home = path.join("home", "x");
+    assert.deepStrictEqual(resolveThirdPartyPath("M", { LY_3RDPARTY_PATH: "/custom" }, home), {
+      path: "/custom",
+      source: "advanced-flag",
+    });
+    assert.deepStrictEqual(resolveThirdPartyPath("M", {}, home), { path: "M", source: "manifest" });
+    assert.deepStrictEqual(resolveThirdPartyPath(undefined, undefined, home), {
+      path: path.join(home, ".o3de", "3rdParty"),
+      source: "default",
+    });
+  });
+
+  test("resolveThirdPartyPath: a blank Advanced flag is ignored, a padded one is returned unmodified", () => {
+    assert.deepStrictEqual(resolveThirdPartyPath("M", { LY_3RDPARTY_PATH: "  " }, "h"), {
+      path: "M",
+      source: "manifest",
+    });
+    assert.deepStrictEqual(resolveThirdPartyPath("M", { LY_3RDPARTY_PATH: " /custom " }, "h"), {
+      path: " /custom ",
+      source: "advanced-flag",
+    });
   });
 
   test("formatCommand quotes tokens with spaces / = / path chars, leaves bare flags", () => {

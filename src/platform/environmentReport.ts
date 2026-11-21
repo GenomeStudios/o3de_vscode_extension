@@ -24,7 +24,8 @@ import { discoverEngines, resolveProjectEngine } from "../o3de/discovery";
 import { isLinuxSupportEnabled } from "./platformSupport";
 import { projectBuildDir, fileApiReplyDir, platformBuildDir } from "../build/configureCommand";
 import { resolveRunnable } from "../build/run";
-import { readManifest } from "../o3de/manifest";
+import { workspaceThirdParty } from "../deps/detectors";
+import { describeVsSelection } from "../env/visualStudioPreference";
 import { primaryO3deFolder, enableStateForFolder } from "../workspace/projectScope";
 import { log } from "../log";
 
@@ -88,9 +89,15 @@ function sectionToolchain(deps: DependencyStatus): string[] {
 function sectionEngineProject(): string[] {
   const lines = ["", "## Engine & project", ""];
 
-  const thirdParty = readManifest()?.defaultThirdPartyFolder;
+  // Same path as the onboarding row and Configure: the Advanced tab's LY_3RDPARTY_PATH, else the manifest default.
+  const thirdParty = workspaceThirdParty();
   lines.push(row(["Field", "Value"]), row(["---", "---"]));
-  lines.push(row(["3rd-party path", thirdParty ? `${thirdParty} (${existsMark(thirdParty)})` : "(none in manifest)"]));
+  lines.push(
+    row([
+      "3rd-party path",
+      thirdParty ? `${thirdParty.path} (${existsMark(thirdParty.path)}, ${thirdParty.source})` : "(none set in the manifest or the Advanced tab)",
+    ]),
+  );
 
   const engines = discoverEngines();
   lines.push(row(["Registered engines", engines.length ? String(engines.length) : "none"]));
@@ -121,6 +128,7 @@ function sectionBuildSelections(options: BuildOptions): string[] {
   lines.push(
     row(["Generator", options.generator]),
     row(["Compiler", options.compiler]),
+    ...(process.platform === "win32" ? [row(["Visual Studio", describeVsSelection()])] : []),
     row(["Config", options.config]),
     row(["Targets", options.targets.length ? options.targets.join(", ") : "(all)"]),
     row(["Core count", options.coreCount > 0 ? String(options.coreCount) : "auto"]),

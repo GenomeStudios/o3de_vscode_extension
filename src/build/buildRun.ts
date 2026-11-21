@@ -18,7 +18,7 @@
 
 import * as vscode from "vscode";
 import { log } from "../log";
-import { resolveBuildEnvironment } from "./toolchain";
+import { resolveBuildEnvironment, warnIfCompilerMismatch } from "./toolchain";
 import { isPlatformToolsEnabled, platformDisabledMessage } from "../platform/platformSupport";
 import { Compiler, defaultCompiler } from "./buildOptions";
 import { readProject, O3deProject } from "../o3de/identity";
@@ -129,10 +129,11 @@ async function runBuild(params: HeadlessBuildParams): Promise<BuildResult> {
 
   // The compiler environment for this OS (Windows: MSVC vcvars; Linux: verify
   // gcc/clang, empty delta). Resolved once and reused for the managed command.
-  const toolchain = await resolveBuildEnvironment(params.compiler ?? defaultCompiler());
+  const toolchain = await resolveBuildEnvironment(params.compiler ?? defaultCompiler(), { quiet: !params.interactive });
   if (!toolchain.ok) {
     return blocked("no-toolchain", toolchain.reason ?? "Could not establish the compiler environment.");
   }
+  warnIfCompilerMismatch(projectBuildDir(project.path), toolchain); // the tree keeps its cached compiler, whichever Visual Studio is selected now
 
   if (!isConfiguredFor(project, params.generator)) {
     return blocked(

@@ -10,9 +10,10 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { resolveWorkspaceProject } from "./projectResolve";
+import { runLogFileName } from "./runLog";
 
-const EDITOR_LOG = "Editor.log";
-const ERROR_LOG = "Error.log";
+const EDITOR_LOG = runLogFileName("editor");
+const ERROR_LOG = runLogFileName("error"); // lowercase, as the engine writes it (matters on Linux)
 
 async function openLog(fileName: string, title: string): Promise<void> {
   const project = await resolveWorkspaceProject(title);
